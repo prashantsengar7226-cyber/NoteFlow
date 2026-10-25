@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1792339774008,
+      "tag": "0000_wandering_reaper",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1792499939514,
+      "tag": "0001_gray_zzzax",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1792928679692,
+      "tag": "0002_charming_ben_parker",
+      "breakpoints": true
+    }
+  ]
+}

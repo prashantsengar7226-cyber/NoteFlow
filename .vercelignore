@@ -1,0 +1,23 @@
+# Deployment configuration belongs in Vercel's environment settings.
+.env*
+.git
+.agents
+.codex
+.vercel
+.next
+.next-staging
+.test-runtime
+.release
+node_modules
+audit
+tests
+outputs
+work
+coverage
+*.log
+*.tsbuildinfo
+*.db*
+dependency-audit.json
+scripts/qa-auth-preload.mjs
+scripts/workspace-qa.mjs
+scripts/browser-qa.mjs

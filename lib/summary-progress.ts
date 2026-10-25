@@ -1,0 +1,235 @@
+import { AppError, type Segment, type SummaryProgress } from './core';
+import {
+  db,
+  consumeService,
+  generateSummaryPart,
+  mergeSummaryParts,
+  type NoteRow,
+  type SummaryPart,
+} from './server';
+import { summarySourceChunks } from './study';
+
+const KIND = '__summary_progress';
+type Progress = {
+  runId: string;
+  language: string;
+  detail: string;
+  parts: SummaryPart[];
+  totalParts: number;
+  lockUntil: number;
+  error?: string | null;
+};
+type Input = { language: string; detail: string; runId?: string; completedParts?: number };
+
+function progressView(progress: Progress, segments: Segment[]): SummaryProgress | null {
+  if (progress.parts.length === progress.totalParts) return null;
+  const preview = progress.parts.length
+    ? mergeSummaryParts(progress.parts, segments, progress.language)
+    : null;
+  if (preview) {
+    const chunks = summarySourceChunks(segments, progress.detail);
+    const remaining = new Set(
+      chunks
+        .slice(progress.parts.length)
+        .flat()
+        .map((segment) => segment.id),
+    );
+    const reviewed = chunks
+      .slice(0, progress.parts.length)
+      .flat()
+      .filter((segment) => !remaining.has(segment.id));
+    preview.coverage = {
+      reviewedSegments: new Set(reviewed.map((segment) => segment.id)).size,
+      totalSegments: segments.length,
+      parts: progress.parts.length,
+    };
+  }
+  return {
+    runId: progress.runId,
+    language: progress.language,
+    detail: progress.detail,
+    completedParts: progress.parts.length,
+    totalParts: progress.totalParts,
+    state: progress.lockUntil > Date.now() ? 'running' : 'paused',
+    // Older releases mislabeled AI 404s as transcription failures. Correct the
+    // saved display text without modifying the source or completed summary parts.
+    error: progress.error?.startsWith('This video could not be transcribed.')
+      ? 'An AI model was unavailable. Your source and completed summary parts are saved. Resume summary to retry with the available providers.'
+      : progress.error ?? null,
+    preview,
+  };
+}
+
+/** Call only after the note's ownership has been verified. */
+export async function readSummaryProgress(note: NoteRow) {
+  const row = await db()
+    .prepare('SELECT content FROM artifacts WHERE note_id=? AND kind=?')
+    .bind(note.id, KIND)
+    .first<{ content: string }>();
+  return row ? progressView(JSON.parse(row.content), JSON.parse(note.transcript)) : null;
+}
+export async function clearPausedSummary(note: NoteRow) {
+  const row = await db()
+    .prepare('SELECT content FROM artifacts WHERE note_id=? AND kind=?')
+    .bind(note.id, KIND)
+    .first<{ content: string }>();
+  if (!row) return;
+  const progress = JSON.parse(row.content) as Progress;
+  if (progress.lockUntil > Date.now())
+    throw new AppError(
+      409,
+      'SUMMARY_IN_PROGRESS',
+      'Wait for the current summary request to finish before choosing Basic summary.',
+    );
+  const removed = await db()
+    .prepare('DELETE FROM artifacts WHERE note_id=? AND kind=? AND content=? RETURNING note_id')
+    .bind(note.id, KIND, row.content)
+    .first();
+  if (!removed)
+    throw new AppError(409, 'SUMMARY_CHANGED', 'The summary changed in another window. Try again.');
+}
+
+/** One provider call per request. A lease and compare-and-swap protect retries and other tabs. */
+export async function summaryStep(note: NoteRow, owner: string, segments: Segment[], input: Input) {
+  const chunks = summarySourceChunks(segments, input.detail);
+  const row = await db()
+    .prepare('SELECT content FROM artifacts WHERE note_id=? AND kind=?')
+    .bind(note.id, KIND)
+    .first<{ content: string }>();
+  const previous = row ? (JSON.parse(row.content) as Progress) : null;
+  const response = (progress: Progress) => {
+    const complete = progress.parts.length === progress.totalParts;
+    return {
+      runId: progress.runId,
+      completedParts: progress.parts.length,
+      totalParts: progress.totalParts,
+      progress: progressView(progress, segments),
+      ...(complete
+        ? { result: mergeSummaryParts(progress.parts, segments, progress.language) }
+        : { pending: true }),
+    };
+  };
+  const conflict = () =>
+    new AppError(
+      409,
+      'SUMMARY_IN_PROGRESS',
+      'This summary is being updated in another request. Wait a moment, then try again. Completed parts are saved.',
+    );
+  if (
+    input.runId &&
+    (!previous ||
+      input.runId !== previous.runId ||
+      input.language !== previous.language ||
+      input.detail !== previous.detail)
+  )
+    throw new AppError(
+      409,
+      'SUMMARY_CHANGED',
+      'This summary changed in another window. Generate again to continue.',
+    );
+  // Replaying a completed step returns saved progress without spending another AI unit.
+  if (
+    input.runId &&
+    previous &&
+    (previous.parts.length === previous.totalParts ||
+      (input.completedParts !== undefined && input.completedParts < previous.parts.length))
+  )
+    return response(previous);
+  if (previous && previous.lockUntil > Date.now()) throw conflict();
+  if (
+    input.runId &&
+    input.completedParts !== undefined &&
+    input.completedParts !== previous?.parts.length
+  )
+    throw conflict();
+
+  const resume =
+    previous &&
+    previous.language === input.language &&
+    previous.detail === input.detail &&
+    previous.parts.length < previous.totalParts;
+  const progress: Progress = resume
+    ? previous
+    : {
+        runId: crypto.randomUUID(),
+        language: input.language,
+        detail: input.detail,
+        parts: [],
+        totalParts: chunks.length,
+        lockUntil: 0,
+      };
+  const reserved = JSON.stringify({ ...progress, error: null, lockUntil: Date.now() + 180000 });
+  const claimed = await db()
+    .prepare(
+      'INSERT INTO artifacts(note_id,kind,content,created_at) VALUES(?,?,?,?) ON CONFLICT(note_id,kind) DO UPDATE SET content=excluded.content,created_at=excluded.created_at WHERE artifacts.content=? RETURNING content',
+    )
+    .bind(note.id, KIND, reserved, Date.now(), row?.content ?? null)
+    .first();
+  if (!claimed) throw conflict();
+  let refund: (() => Promise<void>) | undefined;
+  try {
+    refund = await consumeService(owner, 'ai');
+    const part = await generateSummaryPart(
+      chunks[progress.parts.length],
+      input.language,
+      input.detail,
+      progress.parts.length,
+      chunks.length,
+    );
+    const next = { ...progress, parts: [...progress.parts, part], error: null, lockUntil: 0 };
+    const serialized = JSON.stringify(next);
+    // Leave room for the source and annotations in the note's database row.
+    const summary = mergeSummaryParts(next.parts, segments, input.language);
+    const summaryJson = JSON.stringify(summary);
+    if (new TextEncoder().encode(summaryJson).byteLength > 400000)
+      throw new AppError(
+        413,
+        'SUMMARY_SIZE',
+        'This study guide is too large to save. Choose a concise summary or split the source. Your previous summary is safe.',
+      );
+    const complete = next.parts.length === chunks.length;
+    const statements = [];
+    if (complete)
+      statements.push(
+        db()
+          .prepare(
+            'UPDATE notes SET summary=?,updated_at=? WHERE id=? AND owner=? AND EXISTS (SELECT 1 FROM artifacts WHERE note_id=? AND kind=? AND content=?) RETURNING id',
+          )
+          .bind(summaryJson, Date.now(), note.id, owner, note.id, KIND, reserved),
+      );
+    statements.push(
+      db()
+        .prepare(
+          'UPDATE artifacts SET content=?,created_at=? WHERE note_id=? AND kind=? AND content=? RETURNING content',
+        )
+        .bind(serialized, Date.now(), note.id, KIND, reserved),
+    );
+    const written = await db().batch(statements);
+    if (!written[written.length - 1].results.length) throw conflict();
+    return response(next);
+  } catch (error) {
+    await refund?.().catch(() =>
+      console.error(JSON.stringify({ event: 'quota_refund_failed', service: 'ai' })),
+    );
+    await db()
+      .prepare('UPDATE artifacts SET content=? WHERE note_id=? AND kind=? AND content=?')
+      .bind(
+        JSON.stringify({
+          ...progress,
+          lockUntil: 0,
+          error:
+            error instanceof AppError
+              ? error.message
+              : 'Generation stopped. Your saved parts are safe. Please resume the summary.',
+        }),
+        note.id,
+        KIND,
+        reserved,
+      )
+      .run();
+    if (error instanceof AppError && progress.parts.length)
+      error.message +=
+        ' Completed summary parts are saved. Choose Resume summary to continue.';
+    throw error;
+  }
+}

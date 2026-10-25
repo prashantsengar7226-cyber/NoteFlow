@@ -1,0 +1,162 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { summaryChunks, mergeStudyItems, studyCoverage } from '../.test-runtime/study.mjs';
+import { createStudyPdf, createSummaryCollectionPdf } from '../.test-runtime/pdf.mjs';
+import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
+import { readFile, writeFile } from 'node:fs/promises';
+
+test('summary chunking preserves every character and original reference, including oversized segments', () => {
+  const segments = [
+    { id: 7, start: null, text: 'A'.repeat(18000) },
+    { id: 9, start: 42, text: 'The final exception matters.' },
+  ];
+  const chunks = summaryChunks(segments, 8000);
+  assert.equal(chunks.length, 3);
+  assert.equal(
+    chunks
+      .flat()
+      .map((s) => s.text)
+      .join(''),
+    segments.map((s) => s.text).join(''),
+  );
+  assert.deepEqual([...new Set(chunks.flat().map((s) => s.id))], [7, 9]);
+});
+test('practice merge removes punctuation/case duplicates and coverage uses real references', () => {
+  const existing = [{ front: 'What is focus?', back: 'Attention', segmentIds: [0] }];
+  const merged = mergeStudyItems(
+    existing,
+    [
+      { front: 'WHAT is focus!', back: 'Different answer', segmentIds: [0] },
+      { front: 'How do you take a break?', back: 'Stand up', segmentIds: [1] },
+    ],
+    5,
+  );
+  assert.equal(merged.length, 2);
+  assert.equal(merged[0].back, 'Attention');
+  assert.deepEqual(studyCoverage([{ id: 0 }, { id: 1 }, { id: 2 }], merged).missing, [{ id: 2 }]);
+});
+test('downloaded PDF includes complete notes, cards, source, and a separate answer key', async () => {
+  const fonts = {};
+  for (const [key, file] of Object.entries({
+    regular: 'NotoSans-Regular.ttf',
+    bold: 'NotoSans-Bold.ttf',
+    hindi: 'NotoSansDevanagari-Regular.ttf',
+    arabic: 'NotoSansArabic-Regular.ttf',
+    cjk: 'NotoSansCJKjp-Regular.otf',
+  }))
+    fonts[key] = new Uint8Array(await readFile('public/fonts/' + file)).buffer;
+  const bytes = await createStudyPdf(
+    {
+      title: 'Focused work / केंद्रित अध्ययन',
+      source: 'Text',
+      video_id: null,
+      transcript: [
+        {
+          id: 0,
+          start: null,
+          text: 'Choose a specific goal and take a break. '.repeat(7692) + 'FINAL SOURCE POINT',
+        },
+      ],
+      summary: {
+        title: 'Focus',
+        overview: 'Give one task your attention.',
+        keyPoints: [{ text: 'Choose a specific goal.', segmentIds: [0] }],
+        chapters: [],
+        engine: 'ai',
+        language: 'English',
+      },
+      annotations:
+        'My personal reflection. सभी मुख्य विचारों को समझें और महत्वपूर्ण अपवादों को न भूलें।',
+    },
+    {
+      flashcards: {
+        cards: [{ front: 'What comes first?', back: 'Choose a specific goal.', segmentIds: [0] }],
+      },
+      quiz: {
+        questions: [
+          {
+            question: 'What should you choose?',
+            options: ['A specific goal', 'No goal', 'More tabs', 'Distractions'],
+            correctIndex: 0,
+            explanation: 'Clear outcomes guide focused work.',
+            segmentIds: [0],
+          },
+        ],
+      },
+    },
+    'all',
+    fonts,
+  );
+  assert.equal(new TextDecoder().decode(bytes.subarray(0, 5)), '%PDF-');
+  const loading = getDocument({ data: new Uint8Array(bytes), useSystemFonts: false });
+  const pdf = await loading.promise;
+  try {
+    const pages = [];
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const content = await (await pdf.getPage(i)).getTextContent();
+      pages.push(content.items.map((item) => item.str).join(' '));
+    }
+    assert.ok(pages.some((page) => page.includes('My personal reflection.')));
+    assert.ok(pages.some((page) => page.includes('What comes first?')));
+    const questions = pages.findIndex((page) => page.includes('Practice quiz (1)'));
+    const answers = pages.findIndex((page) => page.includes('Quiz answer key'));
+    assert.ok(answers > questions);
+    assert.ok(!pages[questions].includes('Clear outcomes guide focused work.'));
+    assert.ok(pages.some((page) => page.includes('Source transcript')));
+    assert.ok(pages.at(-1).includes('FINAL SOURCE POINT'));
+  } finally {
+    await loading.destroy();
+  }
+});
+
+test('three document summaries export in order with a contents page and separate document pages', async () => {
+  const regular = new Uint8Array(await readFile('public/fonts/NotoSans-Regular.ttf')).buffer;
+  const bold = new Uint8Array(await readFile('public/fonts/NotoSans-Bold.ttf')).buffer;
+  const fonts = { regular, bold, hindi: regular, arabic: regular, cjk: regular };
+  const documents = ['Cell biology', 'Solar energy', 'Project planning'].map((title, index) => ({
+    title,
+    source: 'PDF',
+    video_id: null,
+    annotations: 'PRIVATE ANNOTATION SHOULD NOT APPEAR',
+    transcript: [{ id: index, text: 'RAW SOURCE SHOULD NOT APPEAR', start: null }],
+    summary: {
+      title,
+      overview: `Overview unique to document ${index + 1}.`,
+      keyPoints: [{ text: `Key fact from document ${index + 1}.`, segmentIds: [index] }],
+      chapters: [
+        {
+          title: 'Essential concepts',
+          summary: `Chapter for document ${index + 1}.`,
+          segmentId: index,
+        },
+      ],
+      engine: 'ai',
+      language: 'English',
+    },
+  }));
+  const bytes = await createSummaryCollectionPdf(documents, fonts);
+  if (process.env.NF_PDF_QA_PATH) await writeFile(process.env.NF_PDF_QA_PATH, bytes);
+  const loading = getDocument({ data: new Uint8Array(bytes), useSystemFonts: false });
+  const pdf = await loading.promise;
+  try {
+    assert.equal(pdf.numPages, 4);
+    const pages = [];
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const content = await (await pdf.getPage(i)).getTextContent();
+      pages.push(content.items.map((item) => item.str).join(' '));
+    }
+    assert.match(pages[0], /Documents in this collection/);
+    documents.forEach((document, index) => {
+      assert.ok(pages[index + 1].includes(document.title));
+      assert.ok(pages[index + 1].includes(`Overview unique to document ${index + 1}.`));
+      assert.ok(pages[index + 1].includes(`Section ${index + 1}`));
+    });
+    assert.ok(!pages.join(' ').includes('SHOULD NOT APPEAR'));
+  } finally {
+    await loading.destroy();
+  }
+  await assert.rejects(createSummaryCollectionPdf([], fonts), { code: 'INCOMPLETE_BATCH' });
+  await assert.rejects(createSummaryCollectionPdf([{ ...documents[0], summary: null }], fonts), {
+    code: 'INCOMPLETE_BATCH',
+  });
+});
