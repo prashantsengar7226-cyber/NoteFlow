@@ -2,6 +2,8 @@
 
 Prepared 25 October 2026. The site is live at https://note-flow-blue.vercel.app/. Its public login has been inspected; authenticated acceptance remains local with synthetic users. The latest fixes and verification limits are in QUALITY-AUDIT.md. Payments stay disabled. Email confirmation stays off by product decision; email recovery is unavailable.
 
+Audit continuation: the supplied real-video test failed factual-accuracy acceptance despite eventual persistence of every summary part. See VIDEO-QUALITY-AUDIT.md and REFERENCE-ANALYSIS.md. The newer source changes are a review candidate, not a verified complete-video release; do not interpret the automated infrastructure tests as a factual-quality pass.
+
 Readiness verification: local production build and 104 automated tests passed in the latest release check. Deployment preflight passed again during Vercel preparation. Read-only queries confirmed the currently configured Turso database is reachable and all three checked-in migrations are already applied with matching checksums. No migration or customer record was changed. Repeat database verification if a different database is selected for Vercel.
 
 ## Deploy

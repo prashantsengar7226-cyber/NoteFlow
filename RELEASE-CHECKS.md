@@ -1,6 +1,6 @@
 # NoteFlow v0.6 deployment candidate - 2026-10-25
 
-- Current Node 24 automated suite: **104 passed, 0 failed**. Includes deployment checks, full structured-output requests, validation before fallback success, refusal handling, unavailable-model fallback, separate AI/transcription errors, deadline allocation and paused-summary recovery.
+- Current Node 24 automated suite: **109 passed, 0 failed**. Includes deployment checks, full structured-output requests, validation before fallback success, refusal handling, unavailable-model fallback, separate AI/transcription errors, deadline allocation, paused-summary recovery, multilingual sizing and bounded transient retries.
 - Production Next.js build with TypeScript: passed. Local deployment configuration preflight: passed without displaying credentials.
 - Authentication browser QA: 22 checks; HTTP security: 19 checks; latest fixture workspace QA: eight scenario groups. Workspace checks were rerun after the summary and sidebar fix; provider responses/identities are mocked where recorded in `SECURITY-AUDIT.md`.
 - `vercel.json` now runs `npm run build:deploy`, blocking missing required credentials, invalid selected AI configuration, private browser-key settings, local QA/staging settings and enabled checkout for this free-launch profile.
@@ -8,6 +8,8 @@
 - `LAUNCH.md` is the current deployment and smoke-test guide. Broader staging work and dashboard checks were deferred by the user. The user deployed https://note-flow-blue.vercel.app/; its public login was inspected. Real-account acceptance and enterprise certification are not claimed.
 
 ## Latest quality and interface verification
+
+The real-video continuation supersedes the earlier "unverified" status: the supplied lecture's complete candidate scored **23 pass / 12 fail** on 35 frozen checks. Six targeted live retests improved selected failures but did not establish an accurate full-video result. Provider interruptions also remain. See VIDEO-QUALITY-AUDIT.md for the failed quality gate and REFERENCE-ANALYSIS.md for the expanded 59-asset public reference audit. These changes are for review; no complete-video accuracy or seamless-performance claim is supported.
 
 Source parser loss, long-source overcompression, Groq generation-error classification, cross-request provider cooldowns, upfront summary allowance checks and honest coverage reporting are addressed. All extra study tools have generation/persistence/isolation fixture checks, and all nine tabs are reachable in the browser. The public login, import dashboard and source/notes reader were redesigned with NoteFlow branding. No schema migration or new environment variable is needed.
 

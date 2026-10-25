@@ -8,6 +8,24 @@ const candidates=[{provider:'groq',key:'PRIVATE_GROQ_FIXTURE',model:'groq-fixtur
   {provider:'openrouter',key:'PRIVATE_ROUTER_FIXTURE',model:'openrouter/free'}];
 const payload={answer:'Source answer',segmentIds:[0]};
 const completion=(model='vendor/actual-model')=>Response.json({model,choices:[{finish_reason:'stop',message:{content:JSON.stringify(payload)}}]});
+
+test('last available provider recovers once from explicit gateway failure within its deadline', async () => {
+  let calls=0;const waits=[];
+  await mock(async()=>++calls===1?new Response('private',{status:502}):completion(),async()=>{
+    const result=await routedGenerate([candidates[1]],'system','source',{},8000,{wait:async ms=>waits.push(ms)});
+    assert.equal(result.provider,'openrouter');assert.equal(calls,2);assert.deepEqual(waits,[2000]);
+  });
+});
+
+test('transient retry is bounded and never retries quotas, unknown outcomes or excessive Retry-After', async () => {
+  for(const scenario of ['persistent','quota','network','long-wait','deadline']) {
+    let calls=0;const waits=[];
+    await mock(async()=>{calls++;if(scenario==='network')throw new Error('unknown outcome');return new Response('private',{status:scenario==='quota'?429:503,headers:scenario==='long-wait'?{'retry-after':'120'}:{}});},async()=>{
+      await assert.rejects(routedGenerate([candidates[1]],'system','source',{},scenario==='deadline'?2500:8000,{wait:async ms=>waits.push(ms)}));
+      assert.equal(calls,scenario==='persistent'?2:1,scenario);assert.equal(waits.length,scenario==='persistent'?1:0,scenario);
+    });
+  }
+});
 async function mock(fetcher, run) {
   const previous=globalThis.fetch;
   globalThis.fetch=fetcher;
@@ -55,6 +73,17 @@ test('AI model 404 falls through to the next provider instead of blaming the vid
     const result=await routedGenerate(candidates,'system','source',{},5000);
     assert.equal(result.provider,'openrouter');
     assert.equal(calls,2);
+  });
+});
+
+test('oversized AI requests are distinguished from quota and transcription failures', async () => {
+  let calls=0;
+  await mock(async()=>++calls===1?new Response('private',{status:413}):completion(),async()=>{
+    assert.equal((await routedGenerate(candidates,'system','source',{},5000)).provider,'openrouter');
+    assert.equal(calls,2);
+  });
+  await mock(async()=>new Response('private',{status:413}),async()=>{
+    await assert.rejects(providerFetch('https://fixture.invalid',{},'Groq'),{code:'PROVIDER_INPUT_LIMIT'});
   });
 });
 

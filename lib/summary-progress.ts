@@ -10,7 +10,7 @@ import {
   type NoteRow,
   type SummaryPart,
 } from './server';
-import { summarySourceChunks } from './study';
+import { summarySourceChunks, summaryBoundaryContext } from './study';
 
 const KIND = '__summary_progress';
 type Progress = {
@@ -103,7 +103,7 @@ export async function summaryStep(note: NoteRow, owner: string, segments: Segmen
     .first<{ content: string }>();
   const previous = row ? (JSON.parse(row.content) as Progress) : null;
   const resuming = previous && previous.language === input.language && previous.detail === input.detail && previous.parts.length < previous.totalParts;
-  const chunkVersion = resuming ? previous.chunkVersion ?? 1 : 2;
+  const chunkVersion = resuming ? previous.chunkVersion ?? 1 : 3;
   const chunks = summarySourceChunks(segments, input.detail, chunkVersion);
   const response = (progress: Progress) => {
     const complete = progress.parts.length === progress.totalParts;
@@ -172,7 +172,10 @@ export async function summaryStep(note: NoteRow, owner: string, segments: Segmen
   if (!resume) {
     const [plan, used] = await Promise.all([account(owner), usage(owner)]);
     const remaining = plan.daily.ai - used.ai;
-    if (chunks.length > remaining) throw new AppError(409, 'SUMMARY_ALLOWANCE', `This ${input.detail} summary needs ${chunks.length} AI operations; ${remaining} remain today. Choose a shorter source, Balanced detail, or Basic summary before starting.`);
+    if (chunks.length > remaining) {
+      const balancedHelps = input.detail === 'detailed' && summarySourceChunks(segments, 'balanced').length < chunks.length;
+      throw new AppError(409, 'SUMMARY_ALLOWANCE', `This ${input.detail} summary needs ${chunks.length} AI operations; ${remaining} remain today. Choose a shorter source, ${balancedHelps ? 'Balanced detail, or ' : 'or '}Basic summary before starting.`);
+    }
   }
   await availableAIProviders();
   const reserved = JSON.stringify({ ...progress, error: null, lockUntil: Date.now() + 180000 });
@@ -192,6 +195,7 @@ export async function summaryStep(note: NoteRow, owner: string, segments: Segmen
       input.detail,
       progress.parts.length,
       chunks.length,
+      { source: segments, boundary: summaryBoundaryContext(chunks, progress.parts.length) },
     );
     const next = { ...progress, parts: [...progress.parts, part], error: null, lockUntil: 0 };
     const serialized = JSON.stringify(next);

@@ -523,7 +523,8 @@ test('Gemini summaries and source chat persist with the selected provider and cr
       assert.equal(options.headers['x-goog-api-key'], 'gemini-test-key');
       assert.equal(options.headers.Authorization, undefined);
       const payload = JSON.parse(options.body);
-      assert.match(payload.systemInstruction.parts[0].text, /Summarize in Hindi/);
+      assert.match(payload.systemInstruction.parts[0].text, /every title, overview, key point and chapter in Hindi/);
+      assert.match(payload.contents[0].parts[0].text, /BOUNDARY CONTEXT[\s\S]*languageSample[\s\S]*CURRENT PART/);
       assert.match(payload.contents[0].parts[0].text, /clear goal/);
       assert.equal(payload.generationConfig.responseMimeType, 'application/json');
       assert.equal(payload.generationConfig.thinkingConfig.thinkingLevel, 'low');

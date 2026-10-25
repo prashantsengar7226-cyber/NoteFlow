@@ -60,7 +60,7 @@ export async function providerFetch(url: string, init: RequestInit, name: string
       throw new AppError(502, 'INVALID_AI_OUTPUT', 'The AI response did not match the required format. Your saved work is safe.');
   }
   await response.body?.cancel();
-  if (name === 'Gemini' && [500, 502, 503, 504].includes(response.status))
+  if (name !== 'Transcription' && [500, 502, 503, 504].includes(response.status))
     throw new TransientProviderError(response.status, retryDelay, name);
   if (response.status >= 300 && response.status < 400)
     throw new AppError(
@@ -75,6 +75,8 @@ export async function providerFetch(url: string, init: RequestInit, name: string
       `${name} is at its shared service limit. Try later. Basic summary works with pasted text, PDFs and subtitles.`,
       response.status === 402 ? 3600 : Math.max(60, Math.min(3600, Math.ceil(retryDelay / 1000))),
     );
+  if (name !== 'Transcription' && response.status === 413)
+    throw new AppError(413, 'PROVIDER_INPUT_LIMIT', 'This AI request exceeds the provider\'s input limit. For an older paused run, choose Basic summary to clear its progress, then generate a new Detailed summary with smaller sections. Your source remains saved.');
   if (response.status === 401 || response.status === 403)
     throw new AppError(
       503,
@@ -232,6 +234,7 @@ export type RouterOptions = {
   responseSchema?: Record<string, unknown>;
   validate?: (result: RouterResult) => Promise<void>;
   onFailure?: (candidate: RouterCandidate, error: unknown) => Promise<void>;
+  wait?: (ms: number) => Promise<void>;
 };
 
 function isFallbackError(error: unknown) {
@@ -239,6 +242,7 @@ function isFallbackError(error: unknown) {
     'PROVIDER_BUSY', 'PROVIDER_LIMIT', 'PROVIDER_NETWORK', 'TIMEOUT',
     'MODEL_UNAVAILABLE', 'PROVIDER_ERROR', 'PROVIDER_RESPONSE',
     'INVALID_AI_OUTPUT', 'INVALID_CITATION', 'OUTPUT_LIMIT',
+    'PROVIDER_INPUT_LIMIT',
   ].includes(error.code);
 }
 
@@ -281,7 +285,8 @@ async function compatibleGenerate(
 }
 
 /**
- * Bounded multi-provider router. One request is attempted per configured provider.
+ * Bounded multi-provider router. Prefer the next provider after a failure.
+ * The last compatible provider may retry one explicit transient HTTP failure.
  * Validate the complete response before accepting it. Invalid output can fall
  * through within the same deadline; auth, refusal and bad requests cannot.
  * Provider keys remain server-only and are never returned to the client or logs.
@@ -307,9 +312,23 @@ export async function routedGenerate(
     const attemptBudget = Math.min(60000, Math.max(1000, Math.floor(remaining / (candidates.length - index))));
     const attemptStarted = Date.now();
     try {
-      const generated = candidate.provider === 'gemini'
-        ? await geminiGenerate(candidate.key, candidate.model, candidate.fallbackModel || '', geminiPayload, attemptBudget)
-        : await compatibleGenerate(candidate, systemInstruction, content, attemptBudget, options.responseSchema);
+      let generated;
+      try {
+        generated = candidate.provider === 'gemini'
+          ? await geminiGenerate(candidate.key, candidate.model, candidate.fallbackModel || '', geminiPayload, attemptBudget)
+          : await compatibleGenerate(candidate, systemInstruction, content, attemptBudget, options.responseSchema);
+      } catch (error) {
+        // Only retry a confirmed transient HTTP error when no later provider is
+        // available. Never retry quota/auth errors or ambiguous network outcomes.
+        const delay = error instanceof TransientProviderError ? Math.max(2000, error.retryAfterMs) : Infinity;
+        const retryBudget = attemptBudget - (Date.now() - attemptStarted) - delay;
+        if (candidate.provider === 'gemini' || index !== candidates.length - 1 || delay > 10000 || retryBudget < 1000) throw error;
+        console.info(JSON.stringify({ event: 'ai_router_transient_retry', provider: candidate.provider, delayMs: delay }));
+        await (options.wait ?? (ms => new Promise<void>(resolve => setTimeout(resolve, ms))))(delay);
+        const remainingBudget = Math.min(retryBudget, attemptBudget - (Date.now() - attemptStarted), timeout - (Date.now() - started));
+        if (remainingBudget < 1000) throw error;
+        generated = await compatibleGenerate(candidate, systemInstruction, content, remainingBudget, options.responseSchema);
+      }
       const result = { ...generated, provider: candidate.provider, elapsedMs: Date.now() - attemptStarted };
       // Body decoding, schema and citation failures must remain inside this try.
       // Otherwise an HTTP 200 is incorrectly recorded as a successful generation.

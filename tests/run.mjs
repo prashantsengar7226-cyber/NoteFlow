@@ -56,7 +56,7 @@ await writeFile(
 );
 const result = spawnSync(
   process.execPath,
-  process.argv.includes('--quality-benchmark') ? ['--experimental-transform-types', 'tests/quality-benchmark.mjs'] : process.argv.includes('--live-summary') ? ['--experimental-transform-types', 'tests/live-summary.mjs'] : [
+  process.argv.includes('--verify-video-parts') ? ['--experimental-transform-types', 'tests/real-video-parts.mjs', ...process.argv.slice(2)] : process.argv.includes('--real-video-audit') ? ['--experimental-transform-types', 'tests/real-video-audit.mjs', ...process.argv.slice(2)] : process.argv.includes('--quality-benchmark') ? ['--experimental-transform-types', 'tests/quality-benchmark.mjs'] : process.argv.includes('--live-summary') ? ['--experimental-transform-types', 'tests/live-summary.mjs'] : [
     '--experimental-transform-types',
     '--test',
     'tests/auth.test.mjs',
