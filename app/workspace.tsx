@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
+import { summarySourceChunks } from '@/lib/study';
 import {
   ArrowUpRight,
   ArrowRight,
@@ -187,7 +188,7 @@ async function api<T>(path: string, method = 'GET', payload?: unknown): Promise<
     }
     if (r.status === 401)
       throw new Error('Your session expired. Sign in with your account again to continue.');
-    let data: T & { error?: string; resetAt?: number };
+    let data: T & { error?: string; resetAt?: number; retryAt?: number };
     try {
       data = await r.json();
     } catch {
@@ -198,7 +199,8 @@ async function api<T>(path: string, method = 'GET', payload?: unknown): Promise<
     if (!r.ok)
       throw new Error(
         (data.error || 'Request failed. Please try again.') +
-          (data.resetAt ? ` Next reset: ${new Date(data.resetAt).toLocaleString()}.` : ''),
+          (data.resetAt ? ` Next reset: ${new Date(data.resetAt).toLocaleString()}.` : '') +
+          (data.retryAt ? ` Retry after ${new Date(data.retryAt).toLocaleTimeString()}.` : ''),
       );
     return data;
   } finally {
@@ -1493,8 +1495,9 @@ export default function Workspace({ name }: { name: string }) {
               />
             ) : (
               <div className="note-grid">
-                <section className="note-main">
-                  {note.video_id && (
+                <aside className="study-source" aria-label="Source material">
+                  <div className="study-source-heading"><h2>Your source</h2><span>{note.source}</span></div>
+                  {note.video_id ? (
                     <div className="video-wrap">
                       <iframe
                         id="video-player"
@@ -1505,7 +1508,11 @@ export default function Workspace({ name }: { name: string }) {
                         referrerPolicy="strict-origin-when-cross-origin"
                       />
                     </div>
-                  )}
+                  ) : <p className="source-preview">{note.transcript.slice(0, 3).map(segment => segment.text).join(' ').slice(0, 340)}{note.transcript.reduce((n, segment) => n + segment.text.length, 0) > 340 ? '…' : ''}</p>}
+                  <div className="source-facts"><span>{note.transcript.length.toLocaleString()} source sections</span><button onClick={() => setTab('transcript')}>Read transcript <ArrowUpRight size={14}/></button></div>
+                  {note.video_id && <p className="source-scope">Notes use the transcript. Visuals and on-screen text are not analyzed.</p>}
+                </aside>
+                <section className="note-main">
                   <div
                     className="note-tabs"
                     role="tablist"
@@ -1602,7 +1609,7 @@ export default function Workspace({ name }: { name: string }) {
                         {visibleSummary ? (
                           <>
                             <div className="section-top">
-                              <span className="eyebrow">THE BIG PICTURE</span>
+                              <h2 className="summary-heading">Overview</h2>
                               <div className="summary-tools">
                                 <span className="mode-badge">
                                   {visibleSummary.engine === 'ai'
@@ -1667,11 +1674,12 @@ export default function Workspace({ name }: { name: string }) {
                             )}
                             {visibleSummary.coverage && (
                               <p className="study-coverage">
-                                Reviewed {visibleSummary.coverage.reviewedSegments} of{' '}
+                                Processed {visibleSummary.coverage.reviewedSegments} of{' '}
                                 {visibleSummary.coverage.totalSegments} source sections in{' '}
                                 {visibleSummary.coverage.parts}{' '}
-                                {visibleSummary.coverage.parts === 1 ? 'part' : 'parts'}. Use
-                                Detailed for broader key-point coverage.
+                                {visibleSummary.coverage.parts === 1 ? 'part' : 'parts'}.{' '}
+                                {visibleSummary.coverage.citedSegments !== undefined && `${visibleSummary.coverage.citedSegments} sections referenced in the notes. `}
+                                Processing every section does not guarantee every fact is included. Check important details against the transcript.
                               </p>
                             )}
                             <button
@@ -1694,6 +1702,7 @@ export default function Workspace({ name }: { name: string }) {
                             text="Generate a structured summary, or use basic mode to select key sentences directly from your source."
                           />
                         )}
+                        <p className="generation-estimate">{summaryProgress && summaryProgress.language === language && summaryProgress.detail === detail ? summaryProgress.totalParts - summaryProgress.completedParts : summarySourceChunks(note.transcript, detail).length} AI operations for this summary · {Math.max(0, (status?.dailyLimits.ai ?? 20) - (status?.usage.ai ?? 0))} available today. Detailed keeps smaller sections for more thorough notes.</p>
                         <div className="generation-bar">
                           <div className="select-group">
                             <label>
@@ -2339,7 +2348,7 @@ export default function Workspace({ name }: { name: string }) {
           <main
             id="workspace-main"
             tabIndex={-1}
-            className="content page-enter"
+            className={`content page-enter ${page === 'home' ? 'study-home' : ''}`}
             key={page + folderFilter}
           >
             <div className="page-heading">
@@ -2350,7 +2359,7 @@ export default function Workspace({ name }: { name: string }) {
                 <h1>
                   {page === 'home'
                     ? name === 'there'
-                      ? 'Your knowledge workspace.'
+                      ? 'What would you like to learn?'
                       : `Welcome back, ${name}.`
                     : page === 'starred'
                       ? 'Favorites'
@@ -2360,7 +2369,7 @@ export default function Workspace({ name }: { name: string }) {
                 </h1>
                 <p className="lead">
                   {page === 'home'
-                    ? 'Summarize your sources. Build your knowledge. Keep everything organized.'
+                    ? 'Start with a video, document or text. Turn it into notes you can study.'
                     : 'Find a thought. Pick up where you left off.'}
                 </p>
               </div>

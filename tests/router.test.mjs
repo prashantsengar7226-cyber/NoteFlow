@@ -1,8 +1,9 @@
-import test from 'node:test';
+import test, { beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { routedGenerate, providerJson, providerFetch } from '../.test-runtime/provider.mjs';
-import { ai, schemas, config, summarySchema } from '../.test-runtime/server.mjs';
+import { ai, schemas, config, summarySchema, availableAIProviders } from '../.test-runtime/server.mjs';
 import { env } from '../.test-runtime/harness.mjs';
+beforeEach(async()=>{await env.DB.prepare("DELETE FROM limits WHERE owner LIKE 'provider:cooldown:%'").run();});
 const candidates=[{provider:'groq',key:'PRIVATE_GROQ_FIXTURE',model:'groq-fixture'},
   {provider:'openrouter',key:'PRIVATE_ROUTER_FIXTURE',model:'openrouter/free'}];
 const payload={answer:'Source answer',segmentIds:[0]};
@@ -206,4 +207,39 @@ test('all invalid providers remain rejected and schema checks never silently coe
       assert.equal(calls,2);assert.equal(models,0);
     });
   } finally {for(const key of ['AI_PROVIDER','AI_PROVIDER_ORDER','GROQ_API_KEY','OPENROUTER_API_KEY'])delete env[key];}
+});
+
+
+test('provider cooldown persists across calls, skips quota-limited providers and isolates rotated keys',async()=>{
+  env.AI_PROVIDER='router';env.AI_PROVIDER_ORDER='groq,openrouter';env.GROQ_API_KEY='cooldown-private-fixture';env.OPENROUTER_API_KEY='router-private-fixture';
+  const urls=[];
+  try {
+    await mock(async(url)=>{urls.push(url);return url.includes('groq')?new Response('{}',{status:429,headers:{'retry-after':'120'}}):completion();},async()=>{
+      for(let i=0;i<2;i++)await ai('Answer','source',schemas.chat,[{id:0,text:'Source answer',start:null}]);
+    });
+    assert.equal(urls.filter(url=>url.includes('groq')).length,1);
+    assert.equal(urls.filter(url=>url.includes('openrouter')).length,2);
+    const rows=(await env.DB.prepare("SELECT owner,count FROM limits WHERE owner LIKE 'provider:cooldown:%'").all()).results;
+    assert.equal(rows.length,1);assert.ok(rows[0].count>Date.now()+100000);
+    assert.ok(!rows[0].owner.includes('cooldown-private-fixture'));
+    env.AI_PROVIDER='groq';
+    await assert.rejects(availableAIProviders(),error=>error.code==='PROVIDER_COOLDOWN'&&error.retryAfterSeconds>60);
+    env.GROQ_API_KEY='rotated-private-fixture';assert.equal((await availableAIProviders()).length,1);
+    env.GROQ_API_KEY='cooldown-private-fixture';
+    await env.DB.prepare("UPDATE limits SET count=0 WHERE owner LIKE 'provider:cooldown:%'").run();
+    assert.equal((await availableAIProviders()).length,1);
+  } finally {for(const key of ['AI_PROVIDER','AI_PROVIDER_ORDER','GROQ_API_KEY','OPENROUTER_API_KEY'])delete env[key];}
+});
+
+
+test('Groq json_validate_failed HTTP 400 falls through while true bad requests remain terminal',async()=>{
+ let calls=0;
+ await mock(async()=>++calls===1?Response.json({error:{code:'json_validate_failed',failed_generation:'PRIVATE_OUTPUT'}},{status:400}):completion(),async()=>{
+  const result=await routedGenerate(candidates,'system','source',{},5000);
+  assert.equal(result.provider,'openrouter');assert.equal(calls,2);
+ });
+ calls=0;
+ await mock(async()=>{calls++;return Response.json({error:{code:'invalid_parameter'}},{status:400});},async()=>{
+  await assert.rejects(routedGenerate(candidates,'system','source',{},5000),{code:'PROVIDER_REQUEST'});assert.equal(calls,1);
+ });
 });

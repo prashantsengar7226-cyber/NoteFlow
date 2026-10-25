@@ -2,6 +2,9 @@ import { AppError, type Segment, type SummaryProgress } from './core';
 import {
   db,
   consumeService,
+  account,
+  usage,
+  availableAIProviders,
   generateSummaryPart,
   mergeSummaryParts,
   type NoteRow,
@@ -18,6 +21,7 @@ type Progress = {
   totalParts: number;
   lockUntil: number;
   error?: string | null;
+  chunkVersion?: number;
 };
 type Input = { language: string; detail: string; runId?: string; completedParts?: number };
 
@@ -27,7 +31,7 @@ function progressView(progress: Progress, segments: Segment[]): SummaryProgress 
     ? mergeSummaryParts(progress.parts, segments, progress.language)
     : null;
   if (preview) {
-    const chunks = summarySourceChunks(segments, progress.detail);
+    const chunks = summarySourceChunks(segments, progress.detail, progress.chunkVersion ?? 1);
     const remaining = new Set(
       chunks
         .slice(progress.parts.length)
@@ -39,9 +43,11 @@ function progressView(progress: Progress, segments: Segment[]): SummaryProgress 
       .flat()
       .filter((segment) => !remaining.has(segment.id));
     preview.coverage = {
+      ...preview.coverage,
       reviewedSegments: new Set(reviewed.map((segment) => segment.id)).size,
       totalSegments: segments.length,
       parts: progress.parts.length,
+      processedCharacters: chunks.slice(0, progress.parts.length).flat().reduce((count, segment) => count + segment.text.length, 0),
     };
   }
   return {
@@ -91,12 +97,14 @@ export async function clearPausedSummary(note: NoteRow) {
 
 /** One provider call per request. A lease and compare-and-swap protect retries and other tabs. */
 export async function summaryStep(note: NoteRow, owner: string, segments: Segment[], input: Input) {
-  const chunks = summarySourceChunks(segments, input.detail);
   const row = await db()
     .prepare('SELECT content FROM artifacts WHERE note_id=? AND kind=?')
     .bind(note.id, KIND)
     .first<{ content: string }>();
   const previous = row ? (JSON.parse(row.content) as Progress) : null;
+  const resuming = previous && previous.language === input.language && previous.detail === input.detail && previous.parts.length < previous.totalParts;
+  const chunkVersion = resuming ? previous.chunkVersion ?? 1 : 2;
+  const chunks = summarySourceChunks(segments, input.detail, chunkVersion);
   const response = (progress: Progress) => {
     const complete = progress.parts.length === progress.totalParts;
     return {
@@ -157,7 +165,16 @@ export async function summaryStep(note: NoteRow, owner: string, segments: Segmen
         parts: [],
         totalParts: chunks.length,
         lockUntil: 0,
+        chunkVersion,
       };
+  // Fail before spending the first unit if a new run cannot fit today's budget.
+  // Existing runs can still advance across days, preserving all saved work.
+  if (!resume) {
+    const [plan, used] = await Promise.all([account(owner), usage(owner)]);
+    const remaining = plan.daily.ai - used.ai;
+    if (chunks.length > remaining) throw new AppError(409, 'SUMMARY_ALLOWANCE', `This ${input.detail} summary needs ${chunks.length} AI operations; ${remaining} remain today. Choose a shorter source, Balanced detail, or Basic summary before starting.`);
+  }
+  await availableAIProviders();
   const reserved = JSON.stringify({ ...progress, error: null, lockUntil: Date.now() + 180000 });
   const claimed = await db()
     .prepare(

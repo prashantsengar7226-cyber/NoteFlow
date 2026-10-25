@@ -1,8 +1,8 @@
 # NoteFlow v0.6 first launch
 
-Prepared 25 October 2026. The source is prepared for deployment to Vercel. It has not been publicly deployed or tested on a production URL in this review. Payments stay disabled. Email confirmation stays off by product decision; email recovery is unavailable.
+Prepared 25 October 2026. The site is live at https://note-flow-blue.vercel.app/. Its public login has been inspected; authenticated acceptance remains local with synthetic users. The latest fixes and verification limits are in QUALITY-AUDIT.md. Payments stay disabled. Email confirmation stays off by product decision; email recovery is unavailable.
 
-Readiness verification: local production build and 98 automated tests passed in the preceding release check. Deployment preflight passed again during Vercel preparation. Read-only queries confirmed the currently configured Turso database is reachable and all three checked-in migrations are already applied with matching checksums. No migration or customer record was changed. Repeat database verification if a different database is selected for Vercel.
+Readiness verification: local production build and 104 automated tests passed in the latest release check. Deployment preflight passed again during Vercel preparation. Read-only queries confirmed the currently configured Turso database is reachable and all three checked-in migrations are already applied with matching checksums. No migration or customer record was changed. Repeat database verification if a different database is selected for Vercel.
 
 ## Deploy
 

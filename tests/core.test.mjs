@@ -88,3 +88,11 @@ test('retrieval preserves source identity and markdown escapes no HTML execution
   assert.equal(timestamp(3661), '1:01:01');
   assert.equal(timestamp(null), 'Text');
 });
+
+
+test('plain-text parsing preserves decimals, abbreviations, URLs and Hindi punctuation',()=>{
+ const source='The measured value is 3.14 units. Dr. A.B. Rao recorded version 2.5 at https://example.org/data. This exception is important: values below 0.08 are excluded. ????? ???????? ???????? ???';
+ const parsed=parseTranscript(source).map(segment=>segment.text).join(' ');
+ assert.equal(parsed,source);
+ assert.ok(parsed.includes('The measured value is 3.14'));
+});

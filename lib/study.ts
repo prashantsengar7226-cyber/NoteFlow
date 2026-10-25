@@ -49,10 +49,12 @@ export function summaryChunks(segments: Segment[], budget = 10000): Segment[][] 
   return chunks;
 }
 
-export function summarySourceChunks(segments: Segment[], detail: string) {
+export function summarySourceChunks(segments: Segment[], detail: string, version = 2) {
   const large = segments.reduce((n, segment) => n + segment.text.length, 0) > 60000;
   return summaryChunks(
     segments,
-    detail === 'detailed' ? (large ? 32000 : 8000) : large ? 60000 : 16000,
+    version === 1
+      ? detail === 'detailed' ? (large ? 32000 : 8000) : large ? 60000 : 16000
+      : detail === 'detailed' ? 8000 : 16000,
   );
 }

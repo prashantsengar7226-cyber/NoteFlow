@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import * as notes from '../.test-runtime/notes.mjs';
 import * as actions from '../.test-runtime/actions.mjs';
@@ -7,6 +7,7 @@ import * as transcribe from '../.test-runtime/transcribe.mjs';
 import * as pdfExport from '../.test-runtime/export.mjs';
 import { env, context } from '../.test-runtime/harness.mjs';
 import { guard, consumeService, usage } from '../.test-runtime/server.mjs';
+beforeEach(async()=>{await env.DB.prepare("DELETE FROM limits WHERE owner LIKE 'provider:cooldown:%'").run();});
 
 function geminiResult(value) {
   return Response.json({
@@ -232,6 +233,46 @@ async function create(owner = 'alice') {
   assert.equal(r.status, 201);
   return r.data.note;
 }
+
+test('every additional study tool generates, persists after reload, and stays private', async () => {
+  const owner = 'all-study-tools';
+  const note = await create(owner);
+  const fixtures = {
+    insights: { glossary: [{ term: 'Goal', definition: 'A clear study objective.', segmentIds: [0] }], actions: [], caveats: [] },
+    flashcards: { cards: [{ front: 'How should a session start?', back: 'Choose one clear goal.', segmentIds: [0] }] },
+    quiz: { questions: [{ question: 'What comes first?', options: ['A goal', 'Distraction', 'A break', 'A report'], correctIndex: 0, explanation: 'Start with a clear goal.', segmentIds: [0] }] },
+    mindmap: { title: 'Study routine', branches: [{ label: 'Start', details: ['Choose a goal'] }] },
+    slides: { slides: [{ title: 'Start with a goal', bullets: ['Choose one clear objective'], notes: 'Use the source routine.' }] },
+    translation: { text: '[0] Commencez par un objectif clair.' },
+    chat: { answer: 'Choose one clear goal.', segmentIds: [0] },
+  };
+  const originalFetch = globalThis.fetch;
+  env.AI_PROVIDER = 'gemini';
+  env.GEMINI_API_KEY = 'fixture';
+  try {
+    for (const [action, fixture] of Object.entries(fixtures)) {
+      globalThis.fetch = async () => geminiResult(fixture);
+      const generated = await call(actions, 'POST', {
+        id: note.id, action, language: 'French', question: action === 'chat' ? 'How do I start?' : undefined,
+      }, owner);
+      assert.equal(generated.status, 200, action);
+      const saved = (await call(notes, 'GET', null, owner, '?id=' + note.id)).data;
+      if (action === 'chat') {
+        assert.equal(saved.messages.length, 2);
+        assert.equal(saved.messages[1].answer, fixture.answer);
+      } else {
+        for (const [key, value] of Object.entries(fixture)) assert.deepEqual(saved.artifacts[action][key], value, action);
+      }
+      assert.equal((await call(notes, 'GET', null, 'another-study-owner', '?id=' + note.id)).status, 404);
+    }
+    assert.equal((await call(notes, 'PATCH', { id: note.id, annotations: 'My own interpretation.' }, owner)).status, 200);
+    assert.equal((await call(notes, 'GET', null, owner, '?id=' + note.id)).data.note.annotations, 'My own interpretation.');
+  } finally {
+    globalThis.fetch = originalFetch;
+    delete env.AI_PROVIDER;
+    delete env.GEMINI_API_KEY;
+  }
+});
 test('unauthenticated access is denied and cross-origin writes fail', async () => {
   assert.equal((await call(notes, 'GET', null, null)).status, 401);
   assert.equal(
@@ -861,6 +902,8 @@ test('300,000-character Hindi imports, resumable summaries and exports preserve 
   const n = created.data.note;
   assert.equal(n.transcript.map((s) => s.text).join(''), source);
   await call(actions, 'POST', { id: n.id, action: 'basic' }, owner);
+  // An in-flight pre-update run must keep its original ten chunk boundaries.
+  await env.DB.prepare('INSERT INTO artifacts(note_id,kind,content,created_at) VALUES(?,?,?,?)').bind(n.id,'__summary_progress',JSON.stringify({runId:crypto.randomUUID(),language:'Hindi',detail:'detailed',parts:[],totalParts:10,lockUntil:0}),Date.now()).run();
   const previous = globalThis.fetch;
   env.AI_PROVIDER = 'gemini';
   env.GEMINI_API_KEY = 'fixture';
@@ -1317,4 +1360,20 @@ test('a transient error is recovered within a summary step without repeating alr
     delete env.AI_PROVIDER;
     delete env.GEMINI_API_KEY;
   }
+});
+
+
+test('oversized new detailed runs fail before spending quota or creating progress',async()=>{
+ const owner='summary-preflight';
+ const created=await call(notes,'POST',{kind:'text',text:'Study fact '.repeat(20000),title:'Large study source'},owner);
+ assert.equal(created.status,201);
+ env.AI_PROVIDER='groq';env.GROQ_API_KEY='fixture';const previous=globalThis.fetch;let calls=0;
+ globalThis.fetch=async()=>{calls++;throw new Error('No provider call expected');};
+ try {
+  const result=await call(actions,'POST',{id:created.data.note.id,action:'summary',detail:'detailed',incremental:true},owner);
+  assert.equal(result.status,409);assert.equal(result.data.code,'SUMMARY_ALLOWANCE');assert.equal(calls,0);
+  assert.equal((await usage(owner)).ai,0);
+  const progress=await env.DB.prepare('SELECT content FROM artifacts WHERE note_id=? AND kind=?').bind(created.data.note.id,'__summary_progress').first();
+  assert.equal(progress,null);
+ } finally {globalThis.fetch=previous;delete env.AI_PROVIDER;delete env.GROQ_API_KEY;}
 });

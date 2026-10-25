@@ -15,6 +15,7 @@ import {
   generateArtifact,
   consumeService,
   config,
+  availableAIProviders,
 } from '@/lib/server';
 import { extractiveSummary, type Segment, AppError } from '@/lib/core';
 import { mergeStudyItems, STUDY_LIMIT, summarySourceChunks, type StudyItem } from '@/lib/study';
@@ -78,6 +79,7 @@ export async function POST(r: Request) {
         'Refresh Noteflow to summarize this longer source in saved parts.',
       );
     if (input.action !== 'basic' && config().aiKey) {
+      await availableAIProviders();
       const units =
         input.action === 'summary' ? summarySourceChunks(segments, input.detail).length : 1;
       refund = await consumeService(owner, 'ai', units);

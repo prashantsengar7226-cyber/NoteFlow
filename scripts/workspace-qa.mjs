@@ -93,6 +93,19 @@ try {
   assert.equal(await a.page.getByRole('button',{name:'Resume summary',exact:true}).count(),0);
   await a.page.unroute('**/api/actions');
   results.push({check:'legacy paused error corrected; short-screen navigation usable; mocked resume clears error and completes summary',pass:true});
+  const toolNames=['Summary','Transcript','My notes','Insights','Mind map','Flashcards','Quiz','Slides','Translate'];
+  for(const label of toolNames) {
+    const tab=a.page.getByRole('tab',{name:label,exact:true});
+    await tab.click();assert.equal(await tab.getAttribute('aria-selected'),'true');
+    assert.ok((await a.page.getByRole('tabpanel').innerText()).trim().length>0);
+  }
+  await a.page.getByRole('tab',{name:'Summary',exact:true}).click();
+  await a.page.setViewportSize({width:1440,height:1000});
+  await a.page.screenshot({path:'audit/study-reader-desktop.png',fullPage:true});
+  await a.page.setViewportSize({width:390,height:844});
+  assert.equal(await a.page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  await a.page.screenshot({path:'audit/study-reader-mobile.png',fullPage:true});
+  results.push({check:'all nine study tabs remain reachable with rendered panels; new source-first reader fits desktop and mobile',pass:true});
   assert.equal((await api(a.page,'/api/notes','DELETE',{id})).status,200);
   assert.equal((await api(a.page,'/api/notes?id='+id)).status,404);
   await a.page.setViewportSize({width:1440,height:1000});

@@ -50,6 +50,33 @@ export function db() {
     );
   return env.DB;
 }
+// Shared across serverless instances. Credential rotation starts a fresh circuit;
+// only a one-way fingerprint is stored, never a key or a provider response body.
+async function providerCircuitKey(candidate: RouterCandidate) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(candidate.key));
+  const fingerprint = Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
+  return `provider:cooldown:${candidate.provider}:${candidate.model}:${fingerprint}`;
+}
+export async function availableAIProviders() {
+  const candidates = config().candidates;
+  if (!candidates.length) throw new AppError(503, 'AI_NOT_CONFIGURED', 'AI generation is temporarily unavailable. Use Basic summary while the site owner restores the connection.');
+  const ready: RouterCandidate[] = [];
+  let next = Infinity;
+  for (const candidate of candidates) {
+    const row = await db().prepare('SELECT count FROM limits WHERE owner=? AND bucket=0')
+      .bind(await providerCircuitKey(candidate)).first<{ count: number }>();
+    if (row && row.count > Date.now()) next = Math.min(next, row.count);
+    else ready.push(candidate);
+  }
+  if (!ready.length) throw new AppError(429, 'PROVIDER_COOLDOWN', 'The AI services are cooling down after a quota limit. Your saved parts are safe. Resume after the retry time, or use Basic summary.', Math.max(1, Math.ceil((next - Date.now()) / 1000)));
+  return ready;
+}
+async function recordProviderLimit(candidate: RouterCandidate, error: unknown) {
+  if (!(error instanceof AppError) || error.code !== 'PROVIDER_LIMIT') return;
+  const until = Date.now() + (error.retryAfterSeconds ?? 60) * 1000;
+  await db().prepare('INSERT INTO limits(owner,bucket,count) VALUES(?,0,?) ON CONFLICT(owner,bucket) DO UPDATE SET count=MAX(count,excluded.count)')
+    .bind(await providerCircuitKey(candidate), until).run();
+}
 export const safeHeaders = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' };
 export function json(value: unknown, status = 200) {
   return Response.json(value, { status, headers: safeHeaders });
@@ -233,13 +260,14 @@ export function handleError(e: unknown) {
         error: e.message,
         code: e.code,
         ...(e.code === 'DAILY_LIMIT' ? { resetAt: nextReset() } : {}),
+        ...(e.retryAfterSeconds ? { retryAt: Date.now() + e.retryAfterSeconds * 1000 } : {}),
       },
       e.status,
     );
     if (e.status === 429)
       response.headers.set(
         'Retry-After',
-        String(e.code === 'DAILY_LIMIT' ? Math.ceil((nextReset() - Date.now()) / 1000) : 60),
+        String(e.code === 'DAILY_LIMIT' ? Math.ceil((nextReset() - Date.now()) / 1000) : e.retryAfterSeconds ?? 60),
       );
     return response;
   }
@@ -490,7 +518,7 @@ export async function ai<T>(
     throw new AppError(503, 'AI_NOT_CONFIGURED', 'AI generation is temporarily unavailable. Use Basic summary while the site owner restores the connection.');
   let accepted: { value: T; model: string } | undefined;
   await routedGenerate(
-    c.candidates,
+    await availableAIProviders(),
     systemInstruction,
     content,
     {
@@ -505,6 +533,7 @@ export async function ai<T>(
     timeout,
     {
       responseSchema: z.toJSONSchema(schema) as Record<string, unknown>,
+      onFailure: recordProviderLimit,
       validate: async (generated) => { accepted = await validateAIOutput(generated, schema, source); },
     },
   );
@@ -599,13 +628,13 @@ export async function generateSummaryPart(
     `Summarize in ${language}. Detail: ${detail}. This is part ${index + 1} of ${total}.
 Return {title,overview,keyPoints:[{text,segmentIds:[number]}],chapters:[{title,segmentId,summary}]}.
 Read every source segment. Preserve important definitions, arguments, steps, formulas, numbers, examples, caveats and exceptions, including material near the end.
-${detail === 'detailed' ? 'Make a thorough study guide: use as many distinct key points as needed, up to 32 per part. Do not combine unrelated ideas or omit a significant concept to hit a short fixed count.' : detail === 'concise' ? 'Use 4-8 key points per part, prioritizing the central ideas.' : 'Use 6-16 key points per part, covering the main ideas and important supporting details.'}
-Keep the overview under 100 words. Keep each key point focused: under ${detail === 'detailed' ? '60' : '40'} words. Skip greetings, promotions and repetition.
-Use logical chapters in source order (up to 6), with at most 60 words each. Do not pad a short source. Each key point needs precise source references.`,
+${detail === 'detailed' ? 'Create comprehensive study notes, not an abstract. Extract each distinct definition, named entity, date, quantity, formula, ordered step, comparison, example and exception from this part before composing the notes. Use up to 32 focused key points. Preserve every item in enumerated lists, exact numbers and qualifiers. Keep explanations with the fact they explain; never collapse different facts into a vague generality.' : detail === 'concise' ? 'Use 4-8 key points per part, prioritizing the central ideas.' : 'Use 6-16 key points per part, covering the main ideas and important supporting details.'}
+Keep the overview under 100 words. Keep each key point under ${detail === 'detailed' ? '120' : '60'} words. Skip only greetings, promotions and repetition.
+Use logical chapters in source order (up to ${detail === 'detailed' ? '12' : '6'}), with up to ${detail === 'detailed' ? '180' : '80'} words each. ${detail === 'detailed' ? 'Chapter notes should explain the supporting examples, reasoning and qualifications, not merely restate the overview.' : ''} Do not pad a short source. Each key point needs precise source references. Before returning, check the beginning, middle and end of this part for omitted details. If the source contradicts itself, retain the distinction and attribute it to the source.`,
     sourceText(chunk),
     summarySchema,
     chunk,
-    150000,
+    90000,
     (model) => {
       actualModel = model;
     },
@@ -631,6 +660,9 @@ export function mergeSummaryParts(
       reviewedSegments: segments.length,
       totalSegments: segments.length,
       parts: results.length,
+      citedSegments: new Set(results.flatMap(result => [...result.keyPoints.flatMap(point => point.segmentIds), ...result.chapters.map(chapter => chapter.segmentId)])).size,
+      processedCharacters: segments.reduce((count, segment) => count + segment.text.length, 0),
+      totalCharacters: segments.reduce((count, segment) => count + segment.text.length, 0),
     },
   };
 }

@@ -7,7 +7,7 @@ export type Summary = {
   engine: 'ai' | 'extractive';
   models?: string[];
   language: string;
-  coverage?: { reviewedSegments: number; totalSegments: number; parts: number };
+  coverage?: { reviewedSegments: number; totalSegments: number; parts: number; citedSegments?: number; processedCharacters?: number; totalCharacters?: number };
 };
 export type SummaryProgress = {
   runId: string;
@@ -34,6 +34,7 @@ export class AppError extends Error {
     public status: number,
     public code: string,
     message: string,
+    public retryAfterSeconds?: number,
   ) {
     super(message);
   }
@@ -112,7 +113,10 @@ export function parseTranscript(raw: string): Segment[] {
         segments.push({ id: segments.length, text: content, start, duration: end - start });
     }
   } else {
-    const chunks = raw.trim().match(/[^.!?\n]+[.!?]+(?:\s|$)|[^.!?\n]+$/gm) || [raw];
+    // Split at boundaries instead of matching selected sentence fragments.
+    // The old regex silently dropped text preceding decimal points and dotted
+    // abbreviations, e.g. "The dose is 3.14 units." became "14 units.".
+    const chunks = raw.trim().split(/\n+/).flatMap(line => line.split(/(?<=[.!?।])\s+(?=\S)/u));
     for (const chunk of chunks) {
       const text = clean(chunk);
       if (text) segments.push({ id: segments.length, text, start: null });

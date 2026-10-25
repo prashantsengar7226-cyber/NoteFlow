@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { summaryChunks, mergeStudyItems, studyCoverage } from '../.test-runtime/study.mjs';
+import { summaryChunks, summarySourceChunks, mergeStudyItems, studyCoverage } from '../.test-runtime/study.mjs';
 import { createStudyPdf, createSummaryCollectionPdf } from '../.test-runtime/pdf.mjs';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { readFile, writeFile } from 'node:fs/promises';
@@ -34,6 +34,16 @@ test('practice merge removes punctuation/case duplicates and coverage uses real 
   assert.equal(merged.length, 2);
   assert.equal(merged[0].back, 'Attention');
   assert.deepEqual(studyCoverage([{ id: 0 }, { id: 1 }, { id: 2 }], merged).missing, [{ id: 2 }]);
+});
+
+test('new detailed summaries never enlarge chunks for long sources; legacy runs keep their boundaries',()=>{
+  const source=[{id:0,start:0,text:'A'.repeat(299990)+' FINALEND.'}];
+  const current=summarySourceChunks(source,'detailed');
+  assert.equal(current.length,38);
+  assert.ok(current.every(chunk=>chunk.reduce((n,s)=>n+s.text.length,0)<=8000));
+  assert.equal(current.flat().map(s=>s.text).join(''),source[0].text);
+  assert.equal(summarySourceChunks(source,'detailed',1).length,10);
+  assert.equal(summarySourceChunks(source,'balanced').length,19);
 });
 test('downloaded PDF includes complete notes, cards, source, and a separate answer key', async () => {
   const fonts = {};

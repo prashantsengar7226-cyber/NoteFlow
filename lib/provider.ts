@@ -51,6 +51,14 @@ export async function providerFetch(url: string, init: RequestInit, name: string
     JSON.stringify({ event: 'provider_failed', provider: name, status: response.status }),
   );
   const retryDelay = retryAfter(response.headers.get('retry-after'));
+  // Groq returns a generation/schema failure as HTTP 400. This is different
+  // from an invalid request setting: permit fallback only for its exact code.
+  if (name === 'Groq' && response.status === 400) {
+    const data = await providerJson(response, 100000).catch(() => null);
+    const error = data?.error as { code?: unknown } | undefined;
+    if (error?.code === 'json_validate_failed')
+      throw new AppError(502, 'INVALID_AI_OUTPUT', 'The AI response did not match the required format. Your saved work is safe.');
+  }
   await response.body?.cancel();
   if (name === 'Gemini' && [500, 502, 503, 504].includes(response.status))
     throw new TransientProviderError(response.status, retryDelay, name);
@@ -65,6 +73,7 @@ export async function providerFetch(url: string, init: RequestInit, name: string
       429,
       'PROVIDER_LIMIT',
       `${name} is at its shared service limit. Try later. Basic summary works with pasted text, PDFs and subtitles.`,
+      response.status === 402 ? 3600 : Math.max(60, Math.min(3600, Math.ceil(retryDelay / 1000))),
     );
   if (response.status === 401 || response.status === 403)
     throw new AppError(
@@ -222,6 +231,7 @@ export type RouterResult = { response: Response; provider: RouterProvider; model
 export type RouterOptions = {
   responseSchema?: Record<string, unknown>;
   validate?: (result: RouterResult) => Promise<void>;
+  onFailure?: (candidate: RouterCandidate, error: unknown) => Promise<void>;
 };
 
 function isFallbackError(error: unknown) {
@@ -294,7 +304,7 @@ export async function routedGenerate(
     if (remaining < 1000) break;
     // Reserve a useful share of the same deadline for each remaining provider.
     // Otherwise one hung provider consumes the entire request and no fallback runs.
-    const attemptBudget = Math.max(1000, Math.floor(remaining / (candidates.length - index)));
+    const attemptBudget = Math.min(60000, Math.max(1000, Math.floor(remaining / (candidates.length - index))));
     const attemptStarted = Date.now();
     try {
       const generated = candidate.provider === 'gemini'
@@ -312,6 +322,7 @@ export async function routedGenerate(
       return { ...generated, provider: candidate.provider, elapsedMs };
     } catch (error) {
       lastError = error;
+      await options.onFailure?.(candidate, error);
       console.warn(JSON.stringify({
         event: isFallbackError(error) && index < candidates.length - 1 ? 'ai_router_fallback' : 'ai_router_failed', provider: candidate.provider,
         code: error instanceof AppError ? error.code : 'UNKNOWN',

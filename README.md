@@ -1,6 +1,6 @@
 # NoteFlow v0.6
 
-Start with **[LAUNCH.md](LAUNCH.md)** for the current Vercel deployment steps. **[SECURITY-AUDIT.md](SECURITY-AUDIT.md)** records local verification and the live checks that remain unverified. No public deployment is claimed by this source package.
+Start with **[LAUNCH.md](LAUNCH.md)** for the current Vercel deployment steps. **[SECURITY-AUDIT.md](SECURITY-AUDIT.md)** records local verification and the live checks that remain unverified. The current live site is https://note-flow-blue.vercel.app/. Read [QUALITY-AUDIT.md](QUALITY-AUDIT.md) for the latest summary fixes, public reference analysis, test evidence and remaining limits.
 
 ## Product workspace
 
@@ -14,7 +14,7 @@ All available tools stay free during the launch, with existing daily limits. The
 
 The server routes across configured Gemini, Groq and OpenRouter providers in `AI_PROVIDER_ORDER`. Quota, availability, network, timeout and invalid-output failures can fall through within the request deadline. Full output schemas are supplied to providers; supported Groq models and OpenRouter use strict structured output. Parsing, field bounds and source references must pass before accepting a provider response or saving a part. Authentication errors, invalid requests and provider refusals stop the request. Gemini transient failures have bounded retries and can use its configured fallback model. Only configured providers participate.
 
-Saved summary parts are not regenerated when resuming the same language/detail. New summary parts record the actual responding model, and the summary UI lists recorded model names; earlier parts may lack this metadata. A successful recovery uses one personal generation allowance. Shared limits count generation operations, each of which can make up to three provider attempts; provider-side quotas and any applicable costs remain separate. Persistent outages still require waiting and resuming.
+Saved summary parts are not regenerated when resuming the same language/detail. New summary parts record the actual responding model, and the summary UI lists recorded model names; earlier parts may lack this metadata. A successful recovery uses one personal generation allowance. Shared limits count generation operations, each of which can make bounded provider attempts; provider-side quotas and any applicable costs remain separate. Persistent outages still require waiting and resuming. Rate-limited providers are now skipped across requests until their cooldown expires. New Detailed summaries use fixed 8,000-character sections; the UI estimates operations before starting and preserves legacy paused runs.
 
 Groq and OpenRouter are integrated. Model names in `.env.example` are application defaults; availability and usage limits depend on your provider accounts. Validate them with the deployed connection test before inviting users.
 
