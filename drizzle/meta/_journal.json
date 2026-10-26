@@ -22,6 +22,13 @@
       "when": 1792928679692,
       "tag": "0002_charming_ben_parker",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1792995441621,
+      "tag": "0003_personal_ai_queue",
+      "breakpoints": true
     }
   ]
 }

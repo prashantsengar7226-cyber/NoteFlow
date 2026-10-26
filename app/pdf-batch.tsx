@@ -1,4 +1,5 @@
 'use client';
+import { queuedSummary } from '@/lib/queue-client';
 import { useEffect, useRef, useState } from 'react';
 import { Download, FileText, LoaderCircle, X } from 'lucide-react';
 import { extractPdfText } from '@/lib/pdf-import';
@@ -181,34 +182,11 @@ export function PdfBatch({
             if (mode === 'basic' && !current.summaryProgress) {
               await request('/api/actions', { id, action: 'basic' });
             } else {
-              let runId = current.summaryProgress?.runId;
-              let completedParts = current.summaryProgress?.completedParts ?? 0;
-              const preferences = current.summaryProgress ?? { language, detail };
-              let complete = false;
-              for (let step = 0; step < 100; step++) {
-                if (pause.current) break;
-                update(item.key, { message: `Summarizing · ${completedParts} saved parts` });
-                const result = await request<{
-                  result?: Summary;
-                  runId: string;
-                  completedParts: number;
-                  totalParts: number;
-                }>('/api/actions', {
-                  id,
-                  action: 'summary',
-                  incremental: true,
-                  language: preferences.language,
-                  detail: preferences.detail,
-                  runId,
-                  completedParts,
-                });
-                runId = result.runId;
-                completedParts = result.completedParts;
-                if (result.result) {
-                  complete = true;
-                  break;
-                }
-              }
+              const preferences = current.summaryProgress ?? {language,detail};
+              const result = await queuedSummary(id, {language:preferences.language,detail:preferences.detail}, job => {
+                update(item.key,{message:`Generating and checking: ${job.completedParts} saved parts`});
+              },()=>pause.current);
+              const complete = !!result;
               if (!complete) {
                 update(item.key, { state: 'queued', message: 'Paused. Saved parts will resume.' });
                 if (!pause.current)

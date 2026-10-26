@@ -1,5 +1,9 @@
 export function launchErrors(env) {
   const errors=[];
+  if (env.BYOK_ENCRYPTION_KEY && Buffer.from(env.BYOK_ENCRYPTION_KEY,'base64').length!==32)
+    errors.push('BYOK_ENCRYPTION_KEY must encode 32 random bytes in base64');
+  if (env.QUEUE_SCHEDULER_ENABLED==='true' && (!env.QUEUE_WORKER_SECRET || env.QUEUE_WORKER_SECRET.length<32))
+    errors.push('Background recovery requires QUEUE_WORKER_SECRET with at least 32 characters');
   const required=['NEXT_PUBLIC_SUPABASE_URL','NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY','TURSO_DATABASE_URL','TURSO_AUTH_TOKEN'];
   for(const key of required) if(!env[key]?.trim()) errors.push(`Missing ${key}`);
   for(const [key,protocol,suffix] of [['NEXT_PUBLIC_SUPABASE_URL','https:','.supabase.co'],['TURSO_DATABASE_URL','libsql:','.turso.io']]) {
@@ -12,7 +16,7 @@ export function launchErrors(env) {
     errors.push('Use a Supabase publishable key in NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY');
   for(const key of Object.keys(env)) if(key.startsWith('NEXT_PUBLIC_') && /KEY|TOKEN|SECRET|PASSWORD|DATABASE/.test(key) && !required.includes(key))
     errors.push(`Review unexpected browser-visible setting: ${key}`);
-  if(env.NOTEFLOW_LOCAL_QA || env.NOTEFLOW_STAGING || /qa-auth-preload/.test(env.NODE_OPTIONS??''))
+  if(env.NOTEFLOW_LOCAL_QA || env.NOTEFLOW_QA_AI_TEST || env.NOTEFLOW_STAGING || /qa-auth-preload/.test(env.NODE_OPTIONS??''))
     errors.push('Remove local QA/staging settings from deployment');
   if(env.MONETIZATION_MODE!=='free_launch' || env.BILLING_ENABLED!=='false')
     errors.push('First launch requires MONETIZATION_MODE=free_launch and BILLING_ENABLED=false');

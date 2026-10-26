@@ -6,6 +6,7 @@ export type Summary = {
   chapters: { title: string; segmentId: number; summary: string }[];
   engine: 'ai' | 'extractive';
   models?: string[];
+  sourceChecks?: { checkedParts: number; totalParts: number };
   language: string;
   coverage?: { reviewedSegments: number; totalSegments: number; parts: number; citedSegments?: number; processedCharacters?: number; totalCharacters?: number };
 };

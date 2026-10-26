@@ -1,4 +1,5 @@
 import { env } from './platform';
+import { aiContext, usesPersonalAI } from './ai-context';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
 import {
   AppError,
@@ -28,11 +29,12 @@ export function config() {
     if (provider === 'openrouter') add('openrouter', vars.OPENROUTER_API_KEY, vars.OPENROUTER_MODEL?.trim() || 'openrouter/free');
   }
   // Preserve explicit single-provider mode for debugging and staged rollout.
-  const selected = requested === 'router' ? candidates : candidates.filter((item) => item.provider === requested);
+  const personal = aiContext.getStore()?.candidate;
+  const selected = personal ? [personal] : requested === 'router' ? candidates : candidates.filter((item) => item.provider === requested);
   if (!['router', 'gemini', 'groq', 'openrouter'].includes(requested))
     throw new AppError(503, 'AI_CONFIG', 'AI is unavailable. The site owner needs to check the service configuration.');
   return {
-    provider: requested,
+    provider: personal?.provider ?? requested,
     candidates: selected,
     model: selected[0]?.model || '',
     aiKey: selected[0]?.key,
@@ -154,6 +156,8 @@ export async function consumeService(owner: string, service: ServiceKind, units 
       'PLAN_REQUIRED',
       'This tool needs Pro access. Basic summaries and your saved notes remain available.',
     );
+  // A server-validated personal connection never spends the shared site quota.
+  if (service === 'ai' && usesPersonalAI(owner)) return async () => {};
   await db()
     .prepare('DELETE FROM limits WHERE owner IN (?,?) AND bucket<?')
     .bind(personalKey(owner, service), `service:${service}:shared`, day - 2)
@@ -615,7 +619,7 @@ async function validateAIOutput<T>(generated: RouterResult, schema: z.ZodType<T>
   validateRefs(parsed);
   return { value: parsed, model: `${generated.provider}:${respondingModel}` };
 }
-export type SummaryPart = z.infer<typeof summarySchema> & { model?: string };
+export type SummaryPart = z.infer<typeof summarySchema> & { model?: string; sourceChecked?: boolean };
 export async function generateSummaryPart(
   chunk: Segment[],
   language: string,
@@ -654,6 +658,7 @@ export function mergeSummaryParts(
     keyPoints: results.flatMap((result) => result.keyPoints),
     chapters: results.flatMap((result) => result.chapters),
     engine: 'ai',
+    sourceChecks: { checkedParts: results.filter(r => r.sourceChecked).length, totalParts: results.length },
     models: [
       ...new Set(results.map((result) => result.model).filter((model): model is string => !!model)),
     ],

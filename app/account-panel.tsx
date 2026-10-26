@@ -277,8 +277,8 @@ export function AccountPanel({
                 <div>
                   <strong>Full access. Free while we launch.</strong>
                   <p>
-                    Use every available study tool with your daily allowance. No card required and
-                    no automatic charges.
+                    Use every available study tool with your daily allowance. NoteFlow does not
+                    charge during launch. A connected personal AI provider may charge for requests.
                   </p>
                 </div>
                 <span className="launch-label">FREE LAUNCH</span>
@@ -425,7 +425,7 @@ export function AccountPanel({
             <section className="account-usage">
               <div className="section-top">
                 <div>
-                  <h2>Your daily allowance</h2>
+                  <h2>Your NoteFlow allowance</h2>
                   <p className="muted">
                     Resets{' '}
                     {new Date(data.resetAt).toLocaleString(undefined, {
@@ -479,7 +479,7 @@ export function AccountPanel({
                 ))}
               </div>
               <p className="usage-note">
-                Long sources can use several AI operations. Shared provider limits can be reached
+                Personal keys have no NoteFlow daily AI cap; provider limits and charges apply. The counters above track NoteFlow AI and YouTube imports. Long sources can use several AI operations. Shared provider limits can be reached
                 before your personal allowance.
               </p>
             </section>

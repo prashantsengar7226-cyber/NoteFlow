@@ -60,6 +60,9 @@ import {
   type SummaryProgress,
 } from '@/lib/core';
 import { PdfBatch } from './pdf-batch';
+import { AISettings } from './ai-settings';
+import { SummaryQueue } from './summary-queue';
+import { queuedSummary } from '@/lib/queue-client';
 import { extractPdfText } from '@/lib/pdf-import';
 import { StudyControls } from './study-controls';
 import { GenerationLoader, SummarySkeleton } from './generation-loader';
@@ -113,7 +116,8 @@ type Status = {
   model: string | null;
   fallbackModel: string | null;
   limits: { characters: number; batch: number; uploadMB: number; notes: number };
-  dailyLimits: { ai: number; youtube: number };
+  dailyLimits: { ai: number | null; youtube: number };
+  connection?: {mode:string;enabled:boolean};
   usage: { ai: number; youtube: number };
   plan: { id: string; name: string; billingEnabled: boolean };
   access?: string;
@@ -279,6 +283,8 @@ export default function Workspace({ name }: { name: string }) {
     totalParts?: number;
   } | null>(null);
   const summaryPending = !!note && summaryWork?.id === note.id;
+  const [queuedNoteIds,setQueuedNoteIds] = useState<string[]>([]);
+  const summaryInQueue = !!note && queuedNoteIds.includes(note.id);
   const [summaryProgress, setSummaryProgress] = useState<SummaryProgress | null>(null);
   const visibleSummary = summaryProgress?.preview ?? note?.summary;
   const partialSummary = !!summaryProgress?.preview;
@@ -567,46 +573,15 @@ export default function Workspace({ name }: { name: string }) {
     }
   }
   async function requestSummary(id: string, preferences = { language, detail }) {
-    let runId: string | undefined;
-    let completedParts = 0;
     try {
-      for (let step = 0; step < 100; step++) {
-        const data = await api<{
-          result?: Summary;
-          progress: SummaryProgress | null;
-          runId: string;
-          completedParts: number;
-          totalParts: number;
-        }>('/api/actions', 'POST', {
-          id,
-          action: 'summary',
-          ...preferences,
-          incremental: true,
-          runId,
-          completedParts,
-        });
-        if (currentId.current === id) {
-          setSummaryProgress(data.progress);
-          if (data.result) setNote((n) => (n?.id === id ? { ...n, summary: data.result! } : n));
-        }
-        setSummaryWork((work) =>
-          work?.id === id
-            ? {
-                ...work,
-                completedParts: data.completedParts,
-                totalParts: data.totalParts,
-              }
-            : work,
-        );
-        if (data.result) return { result: data.result, added: undefined };
-        runId = data.runId;
-        completedParts = data.completedParts;
-      }
-      throw new Error('Summary paused. Generate again to continue from the saved parts.');
-    } catch (error) {
-      await reloadSummary(id).catch(() => {});
-      throw error;
-    }
+      const result = await queuedSummary(id, preferences, job => {
+        setSummaryWork(work => work?.id === id ? {...work, completedParts:job.completedParts,totalParts:job.totalParts} : work);
+        void reloadSummary(id).catch(()=>{});
+      });
+      if (!result) throw new Error('Summary paused. Saved parts remain available.');
+      await reloadSummary(id);
+      return {result,added:undefined};
+    } catch(error) { await reloadSummary(id).catch(()=>{}); throw error; }
   }
   async function checkAI() {
     setCheckingAI(true);
@@ -1113,7 +1088,7 @@ export default function Workspace({ name }: { name: string }) {
             <div className="sidebar-usage-label">
               <span>AI operations today</span>
               <strong>
-                {status?.usage.ai ?? 0} / {status?.dailyLimits.ai ?? 20}
+                {status?.connection?.mode === 'personal' ? 'Personal key' : `${status?.usage.ai ?? 0} / ${status?.dailyLimits.ai ?? 20}`}
               </strong>
             </div>
             <progress
@@ -1219,6 +1194,7 @@ export default function Workspace({ name }: { name: string }) {
             </button>
           </div>
         )}
+        <SummaryQueue onUpdated={jobs => { setQueuedNoteIds(jobs.map(job=>job.noteId)); if(currentId.current) void reloadSummary(currentId.current).catch(()=>{}); }} />
         {page === 'plans' || page === 'account' ? (
           <AccountPanel view={page} onUpdated={refreshUsage} />
         ) : page === 'settings' ? (
@@ -1327,6 +1303,7 @@ export default function Workspace({ name }: { name: string }) {
                 )}
               </div>
             </div>
+            <AISettings onUpdated={refreshUsage} />
             <section className="settings-panel">
               <h2>Included in your workspace</h2>
               <div className="included-grid">
@@ -1345,14 +1322,13 @@ export default function Workspace({ name }: { name: string }) {
                 ))}
               </div>
               <p>
-                Your notes belong to your signed-in account. AI and YouTube access use shared
-                provider quotas; the site does not ask visitors for API keys.
+                Your notes belong to your signed-in account. NoteFlow AI uses shared provider quotas. Personal AI uses your selected provider account; YouTube imports still use the site allowance.
               </p>
             </section>
             <section className="settings-panel">
               <h2>Your daily allowance</h2>
               <p>
-                {status?.usage.ai ?? 0} of {status?.dailyLimits.ai ?? 20} AI requests used ·{' '}
+                {status?.connection?.mode === 'personal' ? 'Personal AI: no NoteFlow daily cap' : `${status?.usage.ai ?? 0} of ${status?.dailyLimits.ai ?? 20} NoteFlow AI operations used`} ·{' '}
                 {status?.usage.youtube ?? 0} of {status?.dailyLimits.youtube ?? 3} YouTube imports
                 used.
               </p>
@@ -1360,8 +1336,7 @@ export default function Workspace({ name }: { name: string }) {
                 {status?.resetAt
                   ? `Next reset: ${new Date(status.resetAt).toLocaleString()}. `
                   : 'Resets at midnight UTC. '}
-                Detailed summaries may use several AI requests. Failed requests are returned to your
-                personal allowance. Shared service limits may be reached sooner. Basic summaries,
+                Each summary part uses an operation and a separate source review. Regenerating a rejected part uses another operation. Provider requests may be billable even when unsuccessful. Shared service limits may be reached sooner. Basic summaries,
                 studying saved material and PDF downloads use no AI allowance.
               </p>
             </section>
@@ -1387,7 +1362,7 @@ export default function Workspace({ name }: { name: string }) {
               </div>
               <p>
                 PDFs must contain selectable text. YouTube playlists, channel subscriptions, voice
-                cloning, image/video generation, and scheduled background processing are not
+                cloning and image/video generation are not
                 implemented in this version. Read-aloud uses your browser’s available voices.
               </p>
             </section>
@@ -1577,7 +1552,7 @@ export default function Workspace({ name }: { name: string }) {
                           <section className="summary-progress" aria-label="Summary progress">
                             <div role="status" aria-live="polite">
                               <h2>
-                                {summaryPending || summaryProgress.state === 'running'
+                                {summaryInQueue ? 'Your summary is queued for automatic recovery' : summaryPending || summaryProgress.state === 'running'
                                   ? 'Your summary is in progress'
                                   : 'Your summary is paused'}
                               </h2>
@@ -1589,7 +1564,7 @@ export default function Workspace({ name }: { name: string }) {
                                   : ' Your source is saved. Continue to create the summary.'}
                               </p>
                             </div>
-                            {!summaryPending && summaryProgress.state !== 'running' && (
+                            {!summaryPending && !summaryInQueue && summaryProgress.state !== 'running' && (
                               <button
                                 className="primary"
                                 disabled={!!busy}
@@ -1600,7 +1575,7 @@ export default function Workspace({ name }: { name: string }) {
                             )}
                           </section>
                         )}
-                        {!summaryPending && (summaryProgress?.error || error) && (
+                        {!summaryPending && !summaryInQueue && (summaryProgress?.error || error) && (
                           <div className="summary-error" role="alert">
                             <AlertCircle size={18} />
                             <p>{error || summaryProgress?.error}</p>
@@ -1631,7 +1606,8 @@ export default function Workspace({ name }: { name: string }) {
                               <Sparkles size={21} />
                               <p>{visibleSummary.overview}</p>
                             </div>
-                            <h2>Key takeaways</h2>
+                            {note.summary?.sourceChecks && <p className="source-check-note">Source review: {note.summary.sourceChecks.checkedParts} of {note.summary.sourceChecks.totalParts} parts checked. Checks compare notes with the transcript; they do not independently verify facts or analyze video visuals.</p>}
+                              <h2>Key takeaways</h2>
                             <ol className="takeaways">
                               {visibleSummary.keyPoints.map((p, i) => (
                                 <li key={i}>
@@ -1702,7 +1678,7 @@ export default function Workspace({ name }: { name: string }) {
                             text="Generate a structured summary, or use basic mode to select key sentences directly from your source."
                           />
                         )}
-                        <p className="generation-estimate">{summaryProgress && summaryProgress.language === language && summaryProgress.detail === detail ? summaryProgress.totalParts - summaryProgress.completedParts : summarySourceChunks(note.transcript, detail).length} AI operations for this summary · {Math.max(0, (status?.dailyLimits.ai ?? 20) - (status?.usage.ai ?? 0))} available today. Detailed keeps smaller sections for more thorough notes.</p>
+                        <p className="generation-estimate">{summaryProgress && summaryProgress.language === language && summaryProgress.detail === detail ? summaryProgress.totalParts - summaryProgress.completedParts : summarySourceChunks(note.transcript, detail).length} AI operations for this summary · {status?.connection?.mode === 'personal' ? 'no NoteFlow daily cap; provider limits apply' : `${Math.max(0, (status?.dailyLimits.ai ?? 20) - (status?.usage.ai ?? 0))} available today` }. Detailed keeps smaller sections for more thorough notes.</p>
                         <div className="generation-bar">
                           <div className="select-group">
                             <label>
@@ -2414,10 +2390,10 @@ export default function Workspace({ name }: { name: string }) {
                       AI allowance
                     </span>
                     <strong>
-                      {Math.max(0, (status?.dailyLimits.ai ?? 20) - (status?.usage.ai ?? 0))}
-                      <small> / {status?.dailyLimits.ai ?? 20}</small>
+                      {status?.connection?.mode === 'personal' ? 'Personal key' : Math.max(0, (status?.dailyLimits.ai ?? 20) - (status?.usage.ai ?? 0))}
+                      {status?.connection?.mode !== 'personal' && <small> / {status?.dailyLimits.ai ?? 20}</small>}
                     </strong>
-                    <small>Operations remaining today</small>
+                    <small>{status?.connection?.mode === 'personal' ? 'Provider limits apply' : 'Operations remaining today'}</small>
                   </div>
                 </div>
                 <div className="dashboard-create-grid">

@@ -42,3 +42,6 @@ No live payment or merchant test-mode Checkout was performed. Production remains
 No high-volume load test, unattended queue, cursor-based library pagination, invoice/refund administration or database restore exercise is claimed. BILLING-SETUP.md describes activation, uncertain-order reconciliation and capacity work.
 
 Hosted source commit: e41f1e1599f7d787c40ac2ed62a86386e56436d8. This download is the corresponding native Vercel export; Supabase and Turso replace Sites identity and D1. It starts a separate workspace and does not migrate existing hosted users or notes.
+# Personal AI / queue candidate — 26 October 2026
+
+See [PERSONAL-AI-VERIFICATION.md](PERSONAL-AI-VERIFICATION.md) for the latest local checks and [PERSONAL-AI-SETUP.md](PERSONAL-AI-SETUP.md) for migration/environment/scheduler activation. Earlier release results below retain their original scope; they do not certify this feature's live deployment.

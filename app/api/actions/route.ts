@@ -2,6 +2,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 180;
 import { z } from 'zod';
+import { withOwnerAI, withAILease } from '@/lib/personal-ai';
 import { summaryStep, clearPausedSummary } from '@/lib/summary-progress';
 import {
   guard,
@@ -62,6 +63,7 @@ export async function POST(r: Request) {
     const owner = await guard(r, true);
     const input = inputSchema.parse(await body(r));
     await limited(owner, 20);
+    const execute = async () => {
     const note = await ownedNote(input.id, owner);
     if (note.status !== 'ready')
       throw new AppError(
@@ -87,7 +89,10 @@ export async function POST(r: Request) {
     let result;
     let added: number | undefined;
     if (input.action === 'summary' || input.action === 'basic') {
-      if (input.action === 'basic') await clearPausedSummary(note);
+      if (input.action === 'basic') {
+        await clearPausedSummary(note);
+        await db().prepare("UPDATE ai_jobs SET state='cancelled',updated_at=? WHERE owner=? AND note_id=? AND state IN ('queued','retry','running')").bind(Date.now(),owner,note.id).run();
+      }
       result =
         input.action === 'basic'
           ? extractiveSummary(segments, note.title)
@@ -200,6 +205,8 @@ export async function POST(r: Request) {
           .run();
     }
     return json({ result, ...(added === undefined ? {} : { added }) });
+    };
+    return await (input.action === 'basic' ? withAILease(owner, execute) : withOwnerAI(owner, () => withAILease(owner, execute)));
   } catch (e) {
     await refund?.().catch(() =>
       console.error(JSON.stringify({ event: 'quota_refund_failed', service: 'ai' })),

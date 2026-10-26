@@ -5,6 +5,7 @@ import { createClient } from '@libsql/client';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
+import {randomBytes} from 'node:crypto';
 import nextEnv from '@next/env';
 nextEnv.loadEnvConfig(process.cwd());
 await mkdir('audit',{recursive:true});
@@ -17,6 +18,10 @@ for(const name of (await readdir('drizzle')).filter(x=>x.endsWith('.sql')).sort(
 }
 client.close();
 const env={...process.env,NOTEFLOW_LOCAL_QA:'isolated-fixtures',TURSO_DATABASE_URL:dbUrl,TURSO_AUTH_TOKEN:'',AI_PROVIDER:'router',GEMINI_API_KEY:'',GROQ_API_KEY:'',OPENROUTER_API_KEY:'',SUPADATA_API_KEY:'',RAZORPAY_KEY_ID:'',RAZORPAY_KEY_SECRET:'',RAZORPAY_WEBHOOK_SECRET:'',BILLING_ENABLED:'false',MONETIZATION_MODE:'free_launch'};
+env.BYOK_ENCRYPTION_KEY=randomBytes(32).toString('base64');
+env.QUEUE_WORKER_SECRET=randomBytes(32).toString('hex');
+env.QUEUE_SCHEDULER_ENABLED='false';
+env.NOTEFLOW_QA_AI_TEST='synthetic-only';
 const server=spawn(process.execPath,['--import','./scripts/qa-auth-preload.mjs','node_modules/next/dist/bin/next','start','--hostname','127.0.0.1','--port','3100'],{env,stdio:['ignore','pipe','pipe'],windowsHide:true});
 let serverLog='';server.stdout.on('data',d=>serverLog+=d);server.stderr.on('data',d=>serverLog+=d);
 const base='http://127.0.0.1:3100';
@@ -43,11 +48,54 @@ try {
   }
   results.push({check:'two synthetic accounts reach real workspace via fixture auth',pass:true});
   const [a,b]=sessions;
+  await a.page.locator('.settings-nav').click();
+  await a.page.getByRole('heading',{name:'Choose your AI connection'}).waitFor();
+  await a.page.getByLabel('Model ID',{exact:true}).fill('test-model');
+  await a.page.getByLabel('API key',{exact:true}).fill('synthetic-browser-key-for-local-qa');
+  await a.page.getByLabel('I authorize a connection test',{exact:false}).check();
+  await a.page.getByRole('button',{name:'Test and connect',exact:true}).click();
+  await a.page.getByText('Connection tested and saved. Your personal AI is active.').waitFor();
+  assert.equal(await a.page.getByLabel('API key',{exact:true}).inputValue(),'');
+  for(const width of [1440,390]){
+    await a.page.setViewportSize({width,height:1000});
+    await a.page.locator('.personal-ai-settings').screenshot({path:`audit/personal-ai-settings-${width}.png`});
+    const overflow=await a.page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth,elements:[...document.querySelectorAll('body *')].map(e=>({tag:e.tagName,cls:e.className,x:e.getBoundingClientRect().x,right:e.getBoundingClientRect().right})).filter(e=>e.right>innerWidth+2&&e.x>=0).slice(-15)}));
+    assert.ok(overflow.scroll<=overflow.width,JSON.stringify(overflow));
+  }
+  await a.page.setViewportSize({width:1440,height:1000});
+  results.push({check:'personal key connects through real authenticated API, clears password field and fits desktop/mobile',pass:true});
   const api=async(page,route,method='GET',payload)=>page.evaluate(async({route,method,payload})=>{
     const r=await fetch(route,{method,headers:{'content-type':'application/json'},...(payload?{body:JSON.stringify(payload)}:{})});
     return {status:r.status,data:await r.json()};
   },{route,method,payload});
   const malicious='<img src=x onerror="window.__auditXss=1">';
+  const queueNote=await api(a.page,'/api/notes','POST',{kind:'text',title:'Queue fixture',text:'The square is blue. '.repeat(10)});
+  const queued=await api(a.page,'/api/ai-jobs','POST',{id:queueNote.data.note.id,language:'English',detail:'balanced'});
+  assert.equal(queued.status,202);
+  await a.page.goto(base+'/');
+  await a.page.getByRole('heading',{name:'Summary tasks',exact:true}).waitFor();
+  await a.page.locator('.summary-queue').screenshot({path:'audit/summary-queue-desktop.png'});
+  await a.page.setViewportSize({width:390,height:844});
+  await a.page.locator('.summary-queue').screenshot({path:'audit/summary-queue-mobile.png'});
+  assert.equal(await a.page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  // Drive the protected worker independently of a browser, as an external cron would.
+  await a.page.goto('about:blank');
+  for(let attempt=0;attempt<12;attempt++){
+    const tick=await fetch(base+'/api/queue-worker',{method:'POST',headers:{authorization:`Bearer ${env.QUEUE_WORKER_SECRET}`}});
+    assert.equal(tick.status,202);
+    const state=await (await a.context.request.get(base+'/api/ai-jobs?id='+queued.data.job.id)).json();
+    if(state.job.state==='completed')break;
+    await new Promise(resolve=>setTimeout(resolve,3000));
+  }
+  const finished=await (await a.context.request.get(base+'/api/ai-jobs?id='+queued.data.job.id)).json();
+  assert.equal(finished.job.state,'completed');
+  await a.page.goto(base+'/');
+  assert.equal((await api(a.page,'/api/notes?id='+queueNote.data.note.id)).data.note.summary.sourceChecks.checkedParts,1);
+  assert.equal((await api(b.page,'/api/ai-jobs?id='+queued.data.job.id)).status,404);
+  await api(a.page,'/api/notes','DELETE',{id:queueNote.data.note.id});
+  await api(a.page,'/api/ai-connection','DELETE');
+  results.push({check:'durable queue completes draft and source review through authenticated external ticks with browser away; other account denied',pass:true});
+  await a.page.setViewportSize({width:1440,height:1000});
   const created=await api(a.page,'/api/notes','POST',{kind:'text',title:malicious,text:'Learning is more effective when practice is spaced over time. Recall improves retention. '.repeat(20)});
   assert.equal(created.status,201);const id=created.data.note.id;
   assert.equal((await api(a.page,'/api/actions','POST',{id,action:'basic'})).status,200);
@@ -82,16 +130,23 @@ try {
   const nav=await a.page.locator('.sidebar nav').evaluate(el=>({height:el.clientHeight,scrollHeight:el.scrollHeight}));
   assert.ok(nav.height>=nav.scrollHeight-1,'navigation must not collapse to a one-row scroll area');
   await a.page.screenshot({path:'audit/summary-paused-short-desktop.png',fullPage:true});
-  await a.page.route('**/api/actions',async route=>{
+  await a.page.route('**/api/ai-jobs',async route=>{
+    if(route.request().method()!=='POST')return route.continue();
     const request=route.request().postDataJSON();
-    assert.equal(request.id,id);assert.equal(request.action,'summary');assert.equal(request.language,'Hindi');
-    await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({runId:'fixture-resume',completedParts:2,totalParts:2,progress:null,result:{...part,overview:'Completed fixture summary.',engine:'ai',language:'Hindi',models:['fixture-model']}})});
+    assert.equal(request.id,id);assert.equal(request.language,'Hindi');
+    const resumed=createClient({url:dbUrl});
+    await resumed.batch([
+      {sql:'UPDATE notes SET summary=? WHERE id=?',args:[JSON.stringify({...part,overview:'Completed fixture summary.',engine:'ai',language:'Hindi',models:['fixture-model']}),id]},
+      {sql:"DELETE FROM artifacts WHERE note_id=? AND kind='__summary_progress'",args:[id]},
+    ],'write');
+    resumed.close();
+    await route.fulfill({status:202,contentType:'application/json',body:JSON.stringify({job:{id:crypto.randomUUID(),noteId:id,state:'completed',nextAt:0,completedParts:2,totalParts:2,errorCode:null,background:false}})});
   });
   await a.page.getByLabel('Summary progress').getByRole('button',{name:'Resume summary',exact:true}).click();
   await a.page.getByText('Completed fixture summary.',{exact:true}).waitFor();
   assert.equal(await a.page.locator('.summary-error').count(),0);
   assert.equal(await a.page.getByRole('button',{name:'Resume summary',exact:true}).count(),0);
-  await a.page.unroute('**/api/actions');
+  await a.page.unroute('**/api/ai-jobs');
   results.push({check:'legacy paused error corrected; short-screen navigation usable; mocked resume clears error and completes summary',pass:true});
   const toolNames=['Summary','Transcript','My notes','Insights','Mind map','Flashcards','Quiz','Slides','Translate'];
   for(const label of toolNames) {

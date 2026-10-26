@@ -51,3 +51,6 @@ export async function getChatGPTUser() {
   const owner = context.getStore();
   return owner ? { userId: owner, email: owner + '@test.example' } : null;
 }
+
+export const afterTasks=[];
+export function after(callback){afterTasks.push(callback);}

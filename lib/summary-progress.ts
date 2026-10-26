@@ -1,4 +1,6 @@
 import { AppError, type Segment, type SummaryProgress } from './core';
+import { usesPersonalAI } from './ai-context';
+import { checkSummaryPart } from './summary-quality';
 import {
   db,
   consumeService,
@@ -24,8 +26,9 @@ type Progress = {
   chunkVersion?: number;
   errorCode?: string;
   legacyPrefix?: { version: number; count: number };
+  draft?: SummaryPart;
 };
-type Input = { language: string; detail: string; runId?: string; completedParts?: number };
+type Input = { language: string; detail: string; runId?: string; completedParts?: number; qualityCheck?: boolean };
 
 function progressChunks(segments: Segment[], progress: Progress) {
   if (!progress.legacyPrefix) return summarySourceChunks(segments, progress.detail, progress.chunkVersion ?? 1);
@@ -189,7 +192,7 @@ export async function summaryStep(note: NoteRow, owner: string, segments: Segmen
   }
   // Fail before spending the first unit if a new run cannot fit today's budget.
   // Existing runs can still advance across days, preserving all saved work.
-  if (!resume) {
+  if (!resume && !input.qualityCheck && !usesPersonalAI(owner)) {
     const [plan, used] = await Promise.all([account(owner), usage(owner)]);
     const remaining = plan.daily.ai - used.ai;
     if (chunks.length > remaining) {
@@ -208,8 +211,8 @@ export async function summaryStep(note: NoteRow, owner: string, segments: Segmen
   if (!claimed) throw conflict();
   let refund: (() => Promise<void>) | undefined;
   try {
-    refund = await consumeService(owner, 'ai');
-    const part = await generateSummaryPart(
+    if (!progress.draft) refund = await consumeService(owner, 'ai');
+    let part = progress.draft ?? await generateSummaryPart(
       chunks[progress.parts.length],
       input.language,
       input.detail,
@@ -217,7 +220,15 @@ export async function summaryStep(note: NoteRow, owner: string, segments: Segmen
       chunks.length,
       { source: segments, boundary: summaryBoundaryContext(chunks, progress.parts.length) },
     );
-    const next = { ...progress, parts: [...progress.parts, part], error: null, errorCode: undefined, lockUntil: 0 };
+    if (input.qualityCheck && !progress.draft) {
+      const staged = { ...progress, draft: part, error: null, errorCode: undefined, lockUntil: 0 };
+      const saved = await db().prepare('UPDATE artifacts SET content=? WHERE note_id=? AND kind=? AND content=? RETURNING content')
+        .bind(JSON.stringify(staged), note.id, KIND, reserved).first();
+      if (!saved) throw conflict();
+      return response(staged);
+    }
+    if (input.qualityCheck) part = await checkSummaryPart(part, chunks[progress.parts.length], summaryBoundaryContext(chunks, progress.parts.length), input.detail);
+    const next = { ...progress, draft: undefined, parts: [...progress.parts, part], error: null, errorCode: undefined, lockUntil: 0 };
     const serialized = JSON.stringify(next);
     // Leave room for the source and annotations in the note's database row.
     const summary = mergeSummaryParts(next.parts, segments, input.language);
@@ -257,6 +268,7 @@ export async function summaryStep(note: NoteRow, owner: string, segments: Segmen
       .bind(
         JSON.stringify({
           ...progress,
+          draft: error instanceof AppError && error.code === 'QUALITY_REVIEW' ? undefined : progress.draft,
           lockUntil: 0,
           errorCode: error instanceof AppError ? error.code : 'INTERNAL',
           error:

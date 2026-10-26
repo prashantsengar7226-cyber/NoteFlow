@@ -7,6 +7,13 @@ import {
   uniqueIndex,
 } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
+export const aiCredentials = sqliteTable('ai_credentials', {
+  owner: text('owner').primaryKey(), provider: text('provider').notNull(), model: text('model').notNull(),
+  ciphertext: text('ciphertext').notNull(), revision: text('revision').notNull(), updatedAt: integer('updated_at').notNull(),
+});
+export const aiOwnerLeases = sqliteTable('ai_owner_leases', {
+  owner: text('owner').primaryKey(), token: text('token').notNull(), expiresAt: integer('expires_at').notNull(),
+});
 export const notes = sqliteTable(
   'notes',
   {
@@ -28,6 +35,15 @@ export const notes = sqliteTable(
   },
   (t) => [index('notes_owner_updated').on(t.owner, t.updatedAt)],
 );
+export const aiJobs = sqliteTable('ai_jobs', {
+  id: text('id').primaryKey(), owner: text('owner').notNull(),
+  noteId: text('note_id').notNull().references(() => notes.id, { onDelete: 'cascade' }),
+  language: text('language').notNull(), detail: text('detail').notNull(), credentialRevision: text('credential_revision').notNull(),
+  state: text('state').notNull().default('queued'), failures: integer('failures').notNull().default(0),
+  nextAt: integer('next_at').notNull(), leaseUntil: integer('lease_until').notNull().default(0), leaseToken: text('lease_token'),
+  runId: text('run_id'), completedParts: integer('completed_parts').notNull().default(0), totalParts: integer('total_parts').notNull().default(0),
+  errorCode: text('error_code'), createdAt: integer('created_at').notNull(), updatedAt: integer('updated_at').notNull(),
+}, t => [uniqueIndex('ai_jobs_active_note').on(t.noteId).where(sql`${t.state} IN ('queued','running','retry')`),index('ai_jobs_due').on(t.state,t.nextAt)]);
 export const artifacts = sqliteTable(
   'artifacts',
   {

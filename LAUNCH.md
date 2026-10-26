@@ -1,5 +1,7 @@
 # NoteFlow v0.6 first launch
 
+26 October feature candidate: personal AI connections and durable summary recovery require migration `0003_personal_ai_queue.sql` plus the setup in [PERSONAL-AI-SETUP.md](PERSONAL-AI-SETUP.md). The free cron configuration is prepared; it has not been connected to production. Local verification is recorded in [PERSONAL-AI-VERIFICATION.md](PERSONAL-AI-VERIFICATION.md).
+
 Prepared 25 October 2026. The site is live at https://note-flow-blue.vercel.app/. Its public login has been inspected; authenticated acceptance remains local with synthetic users. The latest fixes and verification limits are in QUALITY-AUDIT.md. Payments stay disabled. Email confirmation stays off by product decision; email recovery is unavailable.
 
 Audit continuation: the supplied real-video test failed factual-accuracy acceptance despite eventual persistence of every summary part. See VIDEO-QUALITY-AUDIT.md and REFERENCE-ANALYSIS.md. The newer source changes are a review candidate, not a verified complete-video release; do not interpret the automated infrastructure tests as a factual-quality pass.

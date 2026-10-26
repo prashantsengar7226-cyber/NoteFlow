@@ -4,6 +4,13 @@ import { spawnSync } from 'node:child_process';
 const dest = new URL('../.test-runtime/', import.meta.url);
 await mkdir(dest, { recursive: true });
 const sources = {
+  'lib/ai-context.ts':'ai-context.mjs',
+  'lib/personal-ai.ts':'personal-ai.mjs',
+  'lib/summary-quality.ts':'summary-quality.mjs',
+  'lib/ai-jobs.ts':'ai-jobs.mjs',
+  'app/api/ai-connection/route.ts':'ai-connection.mjs',
+  'app/api/ai-jobs/route.ts':'ai-jobs-route.mjs',
+  'app/api/queue-worker/route.ts':'queue-worker.mjs',
   'lib/platform.ts': 'platform.mjs',
   'lib/billing.ts': 'billing.mjs',
   'app/api/billing/route.ts': 'billing-route.mjs',
@@ -31,7 +38,9 @@ for (const [path, name] of Object.entries(sources)) {
     .transpileModule(text, {
       compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 },
     })
-    .outputText.replaceAll("'cloudflare:workers'", "'./harness.mjs'")
+    .outputText.replace(/(['"])(?:@\/lib\/|\.\/)(ai-context|personal-ai|summary-quality|ai-jobs)\1/g, "'./$2.mjs'")
+    .replaceAll("'next/server'", "'./harness.mjs'")
+    .replaceAll("'cloudflare:workers'", "'./harness.mjs'")
     .replaceAll("'@/lib/billing'", "'./billing.mjs'")
     .replaceAll("'@/app/chatgpt-auth'", "'./harness.mjs'")
     .replaceAll("'@/lib/summary-progress'", "'./summary-progress.mjs'")
@@ -43,6 +52,7 @@ for (const [path, name] of Object.entries(sources)) {
     .replaceAll("'@/lib/imports'", "'./imports.mjs'")
     .replaceAll("'./platform'", "'./harness.mjs'")
     .replaceAll("'./server'", "'./server.mjs'")
+    .replaceAll("'./summary-progress'", "'./summary-progress.mjs'")
     .replaceAll("'./provider'", "'./provider.mjs'")
     .replaceAll("'./plans'", "'./plans.mjs'")
     .replaceAll("'pdfkit'", "'../node_modules/pdfkit/js/pdfkit.browser.mjs'")
@@ -71,6 +81,7 @@ const result = spawnSync(
     'tests/study.test.mjs',
     'tests/platform.test.mjs',
     'tests/pwa.test.mjs',
+    'tests/personal-ai.test.mjs',
   ],
   { stdio: 'inherit' },
 );

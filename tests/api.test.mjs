@@ -135,50 +135,22 @@ test('more practice appends, removes duplicate prompts, persists, and preserves 
   }
 });
 
-test('concurrent practice batches do not overwrite each other', async () => {
-  const owner = 'practice-concurrent';
-  const n = await create(owner);
-  const previous = globalThis.fetch;
-  env.AI_PROVIDER = 'gemini';
-  env.GEMINI_API_KEY = 'fixture';
-  const waiting = [];
+test('overlapping practice calls are throttled and a later batch preserves saved items', async () => {
+  const owner='practice-concurrent';const n=await create(owner);const previous=globalThis.fetch;
+  env.AI_PROVIDER='gemini';env.GEMINI_API_KEY='fixture';
+  let release,signal,calls=0;const ready=new Promise(resolve=>{signal=resolve;});
   try {
-    globalThis.fetch = () =>
-      new Promise((resolve) => {
-        waiting.push(resolve);
-        if (waiting.length === 2)
-          waiting.forEach((finish, i) =>
-            finish(
-              geminiResult({
-                questions: [
-                  {
-                    question: i === 0 ? 'How do you start?' : 'What should you do after a break?',
-                    options: ['Set a goal', 'Open tabs', 'Get distracted', 'Do nothing'],
-                    correctIndex: 0,
-                    explanation: 'The source explains the routine.',
-                    segmentIds: [0],
-                  },
-                ],
-              }),
-            ),
-          );
-      });
-    const results = await Promise.all(
-      [0, 1].map(() => call(actions, 'POST', { id: n.id, action: 'quiz', count: 5 }, owner)),
-    );
-    assert.deepEqual(
-      results.map((result) => result.status),
-      [200, 200],
-    );
-    assert.equal(
-      (await call(notes, 'GET', null, owner, '?id=' + n.id)).data.artifacts.quiz.questions.length,
-      2,
-    );
-  } finally {
-    globalThis.fetch = previous;
-    delete env.AI_PROVIDER;
-    delete env.GEMINI_API_KEY;
-  }
+    globalThis.fetch=async()=>{
+      const index=calls++;
+      if(index===0){signal();await new Promise(resolve=>{release=resolve;});}
+      return geminiResult({questions:[{question:index===0?'How do you start?':'What happens after a break?',options:['Set a goal','Open tabs','Get distracted','Do nothing'],correctIndex:0,explanation:'The source explains the routine.',segmentIds:[0]}]});
+    };
+    const first=call(actions,'POST',{id:n.id,action:'quiz',count:5},owner);await ready;
+    assert.equal((await call(actions,'POST',{id:n.id,action:'quiz',count:5},owner)).data.code,'AI_BUSY');
+    release();assert.equal((await first).status,200);
+    assert.equal((await call(actions,'POST',{id:n.id,action:'quiz',count:5},owner)).status,200);
+    assert.equal((await call(notes,'GET',null,owner,'?id='+n.id)).data.artifacts.quiz.questions.length,2);
+  }finally{release?.();globalThis.fetch=previous;delete env.AI_PROVIDER;delete env.GEMINI_API_KEY;}
 });
 
 test('detailed summaries process the end of long sources and a failed part cannot replace a saved summary', async () => {
@@ -1082,9 +1054,9 @@ test('simultaneous summary steps use one provider call and save one part', async
     assert.equal(running.data.summaryProgress.preview, null);
     assert.equal(
       (await call(actions, 'POST', { id: n.id, action: 'basic' }, owner)).data.code,
-      'SUMMARY_IN_PROGRESS',
+      'AI_BUSY',
     );
-    assert.equal((await call(actions, 'POST', input, owner)).data.code, 'SUMMARY_IN_PROGRESS');
+    assert.equal((await call(actions, 'POST', input, owner)).data.code, 'AI_BUSY');
     finish(
       geminiResult({
         title: 'Saved',

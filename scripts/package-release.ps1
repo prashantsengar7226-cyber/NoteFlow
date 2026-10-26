@@ -7,7 +7,7 @@ $stage = Join-Path $releaseRoot "source-$stamp"
 $archive = Join-Path $releaseRoot "noteflow-v0.6-$stamp.zip"
 New-Item -ItemType Directory -Path $stage | Out-Null
 $directories = @('app','lib','db','drizzle','public','scripts','tests','deployment')
-$rootFiles = @('package.json','package-lock.json','next.config.ts','proxy.ts','tsconfig.json','postcss.config.mjs','vercel.json','.gitignore','.vercelignore','.env.example','README.md','LAUNCH.md','RELEASE-CHECKS.md','TIMEOUT-HOTFIX.md','SECURITY-AUDIT.md','QUALITY-AUDIT.md','REFERENCE-ANALYSIS.md','VIDEO-QUALITY-AUDIT.md','PRODUCT.md','DESIGN.md','STAGING-READINESS.md','BILLING-SETUP.md')
+$rootFiles = @('package.json','package-lock.json','next.config.ts','proxy.ts','tsconfig.json','postcss.config.mjs','vercel.json','.gitignore','.vercelignore','.env.example','README.md','LAUNCH.md','RELEASE-CHECKS.md','TIMEOUT-HOTFIX.md','PERSONAL-AI-SETUP.md','PERSONAL-AI-VERIFICATION.md','SECURITY-AUDIT.md','QUALITY-AUDIT.md','REFERENCE-ANALYSIS.md','VIDEO-QUALITY-AUDIT.md','PRODUCT.md','DESIGN.md','STAGING-READINESS.md','BILLING-SETUP.md')
 try {
   $files = @($rootFiles | ForEach-Object { Get-Item -LiteralPath (Join-Path $projectRoot $_) -Force })
   foreach ($directory in $directories) {
