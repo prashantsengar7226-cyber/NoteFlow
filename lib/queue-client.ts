@@ -7,8 +7,19 @@ export async function queueRequest<T>(path:string, method='GET', value?:unknown)
   return data;
 }
 export function jobMessage(job:PublicJob) {
-  if (job.state === 'failed') return job.errorCode === 'QUALITY_REVIEW' ? 'Source checks could not confirm this part. Review the transcript or try a different model, then resume.' : job.errorCode === 'AI_CONNECTION_CHANGED' ? 'Your AI connection changed. Resume to use the current connection.' : 'Automatic retries stopped. Check your AI connection and resume. Saved parts are safe.';
-  if (job.state === 'retry') return `Waiting to retry at ${new Date(job.nextAt).toLocaleTimeString()}. Saved parts are safe.`;
+  if (job.state === 'failed') {
+    if (job.errorCode === 'QUALITY_REVIEW' || job.errorCode === 'QUALITY_EVIDENCE') return 'Source checks could not confirm this part. Your transcript and checked parts are saved. Review the transcript or select another model in AI settings, then resume.';
+    if (job.errorCode === 'INVALID_AI_OUTPUT' || job.errorCode === 'INVALID_CITATION') return 'The model repeatedly returned an unusable response. Your saved work is safe. Select another available model in AI settings, then resume.';
+    if (job.errorCode === 'TIMEOUT') return 'The AI provider repeatedly timed out. Your saved work is safe. Resume later or select another model in AI settings.';
+    if (job.errorCode === 'AI_CONNECTION_CHANGED') return 'Your AI connection changed. Resume to use the current connection.';
+    return 'Automatic retries stopped. Check your AI connection and resume. Saved parts are safe.';
+  }
+  if (job.state === 'retry') {
+    const time = new Date(job.nextAt).toLocaleTimeString();
+    if (job.errorCode === 'PROVIDER_LIMIT' || job.errorCode === 'PROVIDER_COOLDOWN') return `Your AI provider's quota or rate limit was reached. Automatic retry at ${time}. Saved parts are safe.`;
+    if (job.errorCode === 'QUALITY_REVIEW') return `A draft needs corrections after source checking. Automatic repair at ${time}. Checked parts are safe.`;
+    return `Waiting to retry at ${time}. Saved parts are safe.`;
+  }
   return 'Generating and checking against your source. Each finished part is saved.';
 }
 export async function queuedSummary(id:string, preferences:{language:string;detail:string}, progress:(job:PublicJob)=>void, paused?:()=>boolean):Promise<Summary|null> {

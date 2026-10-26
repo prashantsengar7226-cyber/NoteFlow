@@ -1,6 +1,6 @@
 import { AppError, type Segment, type SummaryProgress } from './core';
 import { usesPersonalAI } from './ai-context';
-import { checkSummaryPart, SummaryQualityError } from './summary-quality';
+import { checkSummaryPart, SummaryQualityError, SummaryEvidenceError } from './summary-quality';
 import {
   db,
   consumeService,
@@ -28,6 +28,7 @@ type Progress = {
   legacyPrefix?: { version: number; count: number };
   draft?: SummaryPart;
   reviewIssues?: string[];
+  evidenceIssues?: string[];
 };
 type Input = { language: string; detail: string; runId?: string; completedParts?: number; qualityCheck?: boolean };
 
@@ -222,14 +223,14 @@ export async function summaryStep(note: NoteRow, owner: string, segments: Segmen
       { source: segments, boundary: summaryBoundaryContext(chunks, progress.parts.length), reviewIssues: input.qualityCheck ? progress.reviewIssues : undefined },
     );
     if (input.qualityCheck && !progress.draft) {
-      const staged = { ...progress, draft: part, error: null, errorCode: undefined, lockUntil: 0 };
+      const staged = { ...progress, draft: part, evidenceIssues: undefined, error: null, errorCode: undefined, lockUntil: 0 };
       const saved = await db().prepare('UPDATE artifacts SET content=? WHERE note_id=? AND kind=? AND content=? RETURNING content')
         .bind(JSON.stringify(staged), note.id, KIND, reserved).first();
       if (!saved) throw conflict();
       return response(staged);
     }
-    if (input.qualityCheck) part = await checkSummaryPart(part, chunks[progress.parts.length], summaryBoundaryContext(chunks, progress.parts.length), input.detail);
-    const next = { ...progress, draft: undefined, reviewIssues: undefined, parts: [...progress.parts, part], error: null, errorCode: undefined, lockUntil: 0 };
+    if (input.qualityCheck) part = await checkSummaryPart(part, chunks[progress.parts.length], summaryBoundaryContext(chunks, progress.parts.length), input.detail, progress.evidenceIssues);
+    const next = { ...progress, draft: undefined, reviewIssues: undefined, evidenceIssues: undefined, parts: [...progress.parts, part], error: null, errorCode: undefined, lockUntil: 0 };
     const serialized = JSON.stringify(next);
     // Leave room for the source and annotations in the note's database row.
     const summary = mergeSummaryParts(next.parts, segments, input.language);
@@ -271,6 +272,7 @@ export async function summaryStep(note: NoteRow, owner: string, segments: Segmen
           ...progress,
           draft: error instanceof AppError && error.code === 'QUALITY_REVIEW' ? undefined : progress.draft,
           reviewIssues: error instanceof SummaryQualityError ? error.issues : progress.reviewIssues,
+          evidenceIssues: error instanceof SummaryEvidenceError ? error.issues : error instanceof SummaryQualityError ? undefined : progress.evidenceIssues,
           lockUntil: 0,
           errorCode: error instanceof AppError ? error.code : 'INTERNAL',
           error:

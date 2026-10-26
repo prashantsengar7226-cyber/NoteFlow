@@ -101,7 +101,10 @@ export async function runNextJob(owner?: string, id?: string) {
     const retryable = waiting || ['TIMEOUT','PROVIDER_BUSY','PROVIDER_NETWORK','PROVIDER_UNAVAILABLE','UPSTREAM_ERROR','PROVIDER_ERROR','NETWORK_ERROR','INVALID_AI_OUTPUT','INVALID_CITATION','OUTPUT_LIMIT','QUALITY_REVIEW','QUALITY_EVIDENCE','INTERNAL'].includes(code);
     const failures = job.failures + (waiting ? 0 : 1);
     const delay = error instanceof AppError && error.retryAfterSeconds ? error.retryAfterSeconds * 1000 : Math.min(900000, 60000 * 2 ** failures);
-    const nextAt = code === 'DAILY_LIMIT' ? nextReset() + 1000 : Date.now() + Math.max(30000, delay);
+    // A content correction is not a provider outage. Repair promptly within
+    // the same three-failure budget; retain backoff for transport/quota errors.
+    const nextAt = code === 'DAILY_LIMIT' ? nextReset() + 1000 : Date.now() +
+      (code === 'QUALITY_REVIEW' ? Math.max(15000, error instanceof AppError && error.retryAfterSeconds ? error.retryAfterSeconds * 1000 : 0) : Math.max(30000, delay));
     await update(retryable && failures < 3 ? 'retry' : 'failed', code, nextAt, failures);
     console.warn(JSON.stringify({event:'summary_queue_step',state:retryable && failures < 3 ? 'retry':'failed',code}));
   }

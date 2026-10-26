@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process';
 const dest = new URL('../.test-runtime/', import.meta.url);
 await mkdir(dest, { recursive: true });
 const sources = {
+  'lib/queue-client.ts':'queue-client.mjs',
   'lib/ai-context.ts':'ai-context.mjs',
   'lib/ai-models.ts':'ai-models.mjs',
   'app/api/ai-models/route.ts':'ai-models-route.mjs',
@@ -68,7 +69,7 @@ await writeFile(
 );
 const result = spawnSync(
   process.execPath,
-  process.argv.includes('--live-source-review') ? ['--experimental-transform-types', 'tests/live-source-review.mjs', ...process.argv.slice(2)] : process.argv.includes('--live-queue') ? ['--experimental-transform-types', 'tests/live-queue.mjs', ...process.argv.slice(2)] : process.argv.includes('--verify-video-parts') ? ['--experimental-transform-types', 'tests/real-video-parts.mjs', ...process.argv.slice(2)] : process.argv.includes('--real-video-audit') ? ['--experimental-transform-types', 'tests/real-video-audit.mjs', ...process.argv.slice(2)] : process.argv.includes('--quality-benchmark') ? ['--experimental-transform-types', 'tests/quality-benchmark.mjs'] : process.argv.includes('--live-summary') ? ['--experimental-transform-types', 'tests/live-summary.mjs'] : [
+  process.argv.includes('--live-repair') ? ['--experimental-transform-types', 'tests/live-repair.mjs', ...process.argv.slice(2)] : process.argv.includes('--live-source-review') ? ['--experimental-transform-types', 'tests/live-source-review.mjs', ...process.argv.slice(2)] : process.argv.includes('--live-queue') ? ['--experimental-transform-types', 'tests/live-queue.mjs', ...process.argv.slice(2)] : process.argv.includes('--verify-video-parts') ? ['--experimental-transform-types', 'tests/real-video-parts.mjs', ...process.argv.slice(2)] : process.argv.includes('--real-video-audit') ? ['--experimental-transform-types', 'tests/real-video-audit.mjs', ...process.argv.slice(2)] : process.argv.includes('--quality-benchmark') ? ['--experimental-transform-types', 'tests/quality-benchmark.mjs'] : process.argv.includes('--live-summary') ? ['--experimental-transform-types', 'tests/live-summary.mjs'] : [
     '--experimental-transform-types',
     '--test',
     'tests/auth.test.mjs',

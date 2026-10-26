@@ -6,13 +6,14 @@ import {sealKey,openKey,withOwnerAI,withAILease} from '../.test-runtime/personal
 import {aiContext} from '../.test-runtime/ai-context.mjs';
 import {consumeService,usage,config} from '../.test-runtime/server.mjs';
 import {enqueueSummary,runNextJob,findJob,authorizeWorker} from '../.test-runtime/ai-jobs.mjs';
-import {validateReview,summaryClaims} from '../.test-runtime/summary-quality.mjs';
+import {validateReview,summaryClaims,reviewSchema,SummaryQualityError} from '../.test-runtime/summary-quality.mjs';
 import * as connection from '../.test-runtime/ai-connection.mjs';
 import * as jobs from '../.test-runtime/ai-jobs-route.mjs';
 import * as worker from '../.test-runtime/queue-worker.mjs';
 import * as notes from '../.test-runtime/notes.mjs';
 import * as models from '../.test-runtime/ai-models-route.mjs';
 import {listModels} from '../.test-runtime/ai-models.mjs';
+import {jobMessage} from '../.test-runtime/queue-client.mjs';
 
 const originalFetch=globalThis.fetch;
 const source=[{id:0,text:'The square is blue.',start:0}];
@@ -248,9 +249,30 @@ test('invalid reviewer quotes retain the private draft and retry without another
   assert.equal((await findJob('alice',job.id)).state,'completed');assert.equal(calls,3);assert.equal((await usage('alice')).ai,1);
 });
 
-test('rejected content passes private repair feedback to regeneration and clears it after acceptance',async()=>{
+test('review retries receive missing-claim feedback without publishing or regenerating the draft',async()=>{
   const id=await note();const job=await enqueueSummary('alice',{id,language:'English',detail:'balanced'});
-  const issue='title: the source says blue, not red. Recheck the color.';
+  let calls=0;globalThis.fetch=async(_url,init)=>{
+    calls++;
+    if(calls===3)assert.match(JSON.parse(init.body).contents[0].parts[0].text,/Missing evidence for claim IDs: title, overview/);
+    return response(calls===1?part:calls===2?{...goodReview(),evidence:goodReview().evidence.filter(e=>e.claimId.startsWith('point:'))}:goodReview());
+  };
+  await runNextJob('alice',job.id);await due(job.id);await runNextJob('alice',job.id);
+  const pending=JSON.parse((await env.DB.prepare("SELECT content FROM artifacts WHERE note_id=? AND kind='__summary_progress'").bind(id).first()).content);
+  assert.ok(pending.draft);assert.match(pending.evidenceIssues[0],/title, overview/);
+  assert.equal((await env.DB.prepare('SELECT summary FROM notes WHERE id=?').bind(id).first()).summary,null);
+  const publicNote=await call(notes,'GET',undefined,'alice','?id='+id);
+  assert.ok(!JSON.stringify(publicNote.data).includes('evidenceIssues'));
+  await due(job.id);await runNextJob('alice',job.id);
+  assert.equal((await findJob('alice',job.id)).state,'completed');assert.equal(calls,3);assert.equal((await usage('alice')).ai,1);
+  const final=JSON.parse((await env.DB.prepare("SELECT content FROM artifacts WHERE note_id=? AND kind='__summary_progress'").bind(id).first()).content);
+  assert.equal(final.evidenceIssues,undefined);
+});
+
+test('verbose review rejection reaches repair instead of retrying the same draft as invalid output',async()=>{
+  const id=await note();const job=await enqueueSummary('alice',{id,language:'English',detail:'balanced'});
+  // Production Gemini reviews exceeded 300 characters, especially for Hindi.
+  const issue='title: '+ 'स्रोत में नीला रंग है, लाल रंग का दावा समर्थित नहीं है। '.repeat(8)+'Correct the title to blue.';
+  assert.ok(issue.length>300 && issue.length<2000);
   let calls=0;globalThis.fetch=async(_url,init)=>{
     calls++;
     if(calls===3){
@@ -261,14 +283,35 @@ test('rejected content passes private repair feedback to regeneration and clears
     return response(calls===1?{...part,title:'Red square'}:calls===2?{...goodReview(),supported:false,issues:[issue]}:calls===3?part:goodReview());
   };
   await runNextJob('alice',job.id);await due(job.id);await runNextJob('alice',job.id);
+  assert.equal((await findJob('alice',job.id)).error_code,'QUALITY_REVIEW');
+  assert.ok((await findJob('alice',job.id)).next_at < Date.now()+20000);
   const saved=JSON.parse((await env.DB.prepare("SELECT content FROM artifacts WHERE note_id=? AND kind='__summary_progress'").bind(id).first()).content);
   assert.equal(saved.draft,undefined);assert.deepEqual(saved.reviewIssues,[issue]);
   const publicNote=await call(notes,'GET',undefined,'alice','?id='+id);
-  assert.equal(publicNote.status,200);assert.ok(!JSON.stringify(publicNote).includes(issue));
+  assert.equal(publicNote.status,200);assert.ok(!JSON.stringify(publicNote.data).includes(issue));
   await due(job.id);await runNextJob('alice',job.id);await due(job.id);await runNextJob('alice',job.id);
   assert.equal((await findJob('alice',job.id)).state,'completed');assert.equal(calls,4);assert.equal((await usage('alice')).ai,2);
   const final=JSON.parse((await env.DB.prepare("SELECT content FROM artifacts WHERE note_id=? AND kind='__summary_progress'").bind(id).first()).content);
   assert.equal(final.reviewIssues,undefined);assert.equal(final.draft,undefined);
+});
+
+test('verbose negative reviews remain rejections and their stored repair context is bounded',()=>{
+  const review=reviewSchema.parse({...goodReview(),issues:Array.from({length:20},()=> 'x'.repeat(6000))});
+  assert.throws(()=>validateReview(part,source,review),error=>{
+    assert.ok(error instanceof SummaryQualityError);
+    assert.equal(error.issues.length,12);assert.ok(error.issues.every(issue=>issue.length===2000));
+    assert.ok(!error.message.includes('xxx'));return true;
+  });
+  assert.equal(reviewSchema.safeParse({...goodReview(),issues:[{message:'unsupported'}]}).success,false);
+});
+
+test('queue messages distinguish provider quota, correction work and invalid responses',()=>{
+  const job={state:'retry',nextAt:Date.now(),errorCode:'PROVIDER_LIMIT'};
+  assert.match(jobMessage(job),/provider's quota or rate limit/);
+  assert.match(jobMessage({...job,errorCode:'QUALITY_REVIEW'}),/Automatic repair/);
+  assert.match(jobMessage({...job,state:'failed',errorCode:'INVALID_AI_OUTPUT'}),/unusable response/);
+  assert.match(jobMessage({...job,state:'failed',errorCode:'QUALITY_EVIDENCE'}),/Source checks/);
+  assert.match(jobMessage({...job,state:'failed',errorCode:'TIMEOUT'}),/provider repeatedly timed out/);
 });
 
 test('repeated evidence failures stop safely while retaining a single unpublished draft',async()=>{
