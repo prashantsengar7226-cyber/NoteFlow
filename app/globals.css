@@ -3528,6 +3528,10 @@ nav > button:hover,
 .batch-queue li { display:flex; align-items:center; gap:12px; padding:15px 0; border-bottom:1px solid #eee8f4; }
 .batch-queue li>div { flex:1; min-width:0; overflow-wrap:anywhere; }
 .batch-queue p { margin:5px 0 0; font-size:13px; }
+.source-excerpts { margin-bottom:24px; padding:16px; border:1px solid var(--border, #d6dced); border-radius:12px; }
+.source-excerpts>summary { cursor:pointer; font-weight:600; }
+.source-excerpts>p { line-height:1.65; margin:12px 0; }
+.source-excerpts>summary:focus-visible { outline:2px solid #245ce7; outline-offset:4px; }
 .batch-error { color:#a12437; }
 .batch-saved { max-height:240px; overflow:auto; padding:14px; border:1px solid #e7e4ed; border-radius:12px; margin:14px 0; }
 .batch-choice { display:flex; gap:10px; padding:10px 0; overflow-wrap:anywhere; }

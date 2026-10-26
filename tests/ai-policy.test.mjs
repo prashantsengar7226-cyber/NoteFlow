@@ -8,7 +8,7 @@ import {vertexConfig,vertexGenerate} from '../.test-runtime/vertex.mjs';
 import {generateKeyPairSync} from 'node:crypto';
 import {z} from 'zod';
 import {enqueueSummary,runNextJob,findJob,cancelJob} from '../.test-runtime/ai-jobs.mjs';
-import {summaryClaims} from '../.test-runtime/summary-quality.mjs';
+import {summaryClaims,evidenceCatalog,resolveEvidence,validateReview,alignReviewedCitations} from '../.test-runtime/summary-quality.mjs';
 const originalFetch=globalThis.fetch;
 beforeEach(async()=>{
   await env.DB.prepare('DELETE FROM ai_operations').run();
@@ -19,6 +19,26 @@ beforeEach(async()=>{
   env.VERTEX_ENABLED='false';env.AI_ADMIN_USER_IDS='';
 });
 afterEach(()=>{globalThis.fetch=originalFetch;});
+
+test('Vertex evidence IDs resolve exact Unicode text and reject unknown or mismatched citations',()=>{
+  const source=[{id:7,start:0,text:'सही संख्या 540 पुस्तकें है। '.repeat(30)},{id:8,start:1,text:'खरीद अभी प्रस्तावित है।'}];
+  const catalog=evidenceCatalog(source);
+  assert.equal(catalog.filter(p=>p.segmentId===7).map(p=>p.quote).join(''),source[0].text);
+  assert.ok(catalog.every(p=>source.find(s=>s.id===p.segmentId).text.includes(p.quote)));
+  const part={title:'पुस्तकें',overview:'सही संख्या 540 पुस्तकें है।',keyPoints:[{text:'540 पुस्तकें',segmentIds:[7]}],chapters:[]};
+  const review={supported:true,importantOmissions:false,issues:[],evidence:summaryClaims(part).map(c=>({claimId:c.id,sourceIds:['0:0']}))};
+  assert.doesNotThrow(()=>validateReview(part,source,resolveEvidence(review,catalog)));
+  assert.throws(()=>resolveEvidence({...review,evidence:[{claimId:'title',sourceIds:['missing']}]},catalog),e=>e.code==='QUALITY_EVIDENCE');
+  assert.throws(()=>validateReview(part,source,resolveEvidence({...review,evidence:review.evidence.map(e=>e.claimId==='point:0'?{...e,sourceIds:['1:0']}:e)},catalog)),e=>e.code==='QUALITY_EVIDENCE');
+  assert.throws(()=>validateReview(part,source,resolveEvidence({...review,supported:false},catalog)),e=>e.code==='QUALITY_REVIEW');
+  const wrong={...part,keyPoints:[{...part.keyPoints[0],segmentIds:[8]}]};
+  const resolved=resolveEvidence(review,catalog);
+  const aligned=alignReviewedCitations(wrong,resolved);
+  assert.deepEqual(aligned.keyPoints[0].segmentIds,[7]);
+  assert.equal(aligned.keyPoints[0].text,wrong.keyPoints[0].text);
+  assert.doesNotThrow(()=>validateReview(aligned,source,resolved));
+  assert.equal(alignReviewedCitations(wrong,{...resolved,supported:false}),wrong);
+});
 test('weekly IST boundary is Monday midnight, including year rollover',()=>{
   assert.equal(new Date(weekWindow(Date.parse('2026-10-25T18:30:00Z')).start).toISOString(),'2026-10-25T18:30:00.000Z');
   assert.equal(new Date(weekWindow(Date.parse('2026-10-25T18:29:59Z')).resetAt).toISOString(),'2026-10-25T18:30:00.000Z');
@@ -58,12 +78,13 @@ test('small feature calls have no daily user cap and cannot route to Vertex or p
 test('Vertex auth and inference use fixed hosts, global attempt cap covers admins and no fallback',async()=>{
   const {privateKey}=generateKeyPairSync('rsa',{modulusLength:2048});
   Object.assign(env,{VERTEX_ENABLED:'true',VERTEX_PROJECT_ID:'test-project',VERTEX_LOCATION:'global',VERTEX_MODEL:'gemini-test',VERTEX_CREDIT_EXPIRES_AT:'2099-01-01',VERTEX_DAILY_REQUEST_CAP:'1',VERTEX_TOTAL_REQUEST_CAP:'2',VERTEX_SERVICE_ACCOUNT_JSON:JSON.stringify({type:'service_account',client_email:'test@test-project.iam.gserviceaccount.com',private_key:privateKey.export({type:'pkcs8',format:'pem'})})});
+  env.VERTEX_MODEL='gemini-3.5-flash';
   const urls=[];
-  globalThis.fetch=async(url,init)=>{urls.push(url);assert.equal(init.redirect,'manual');return url.includes('oauth2')?Response.json({access_token:'fixture-token',expires_in:3600}):Response.json({candidates:[]});};
+  globalThis.fetch=async(url,init)=>{urls.push(url);assert.equal(init.redirect,'manual');if(!url.includes('oauth2'))assert.equal(JSON.parse(init.body).generationConfig.thinkingConfig.thinkingLevel,'LOW');return url.includes('oauth2')?Response.json({access_token:'fixture-token',expires_in:3600}):Response.json({candidates:[]});};
   await vertexGenerate({},1000);
   await assert.rejects(vertexGenerate({},1000),e=>e.code==='VERTEX_CAP');
   assert.equal(urls.length,2);
-  assert.equal(urls[1],'https://aiplatform.googleapis.com/v1/projects/test-project/locations/global/publishers/google/models/gemini-test:generateContent');
+  assert.equal(urls[1],'https://aiplatform.googleapis.com/v1/projects/test-project/locations/global/publishers/google/models/gemini-3.5-flash:generateContent');
   env.VERTEX_CREDIT_EXPIRES_AT='2020-01-01';assert.throws(vertexConfig,e=>e.code==='VERTEX_NOT_CONFIGURED');
 });
 test('personal gcloud credentials cannot enable Vertex on Vercel',()=>{
@@ -84,7 +105,9 @@ test('queued Vertex generation and review count once; replay is free and cancell
     assert.ok(url.startsWith('https://aiplatform.googleapis.com/'));calls++;
     const payload=JSON.parse(init.body);
     const review=payload.systemInstruction.parts[0].text.includes('skeptical source reviewer');
-    return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(review?{supported:true,importantOmissions:false,issues:[],evidence:summaryClaims(part).map(c=>({claimId:c.id,segmentId:0,quote:'The square is blue.'}))}:part)}]}}]});
+    assert.equal(payload.generationConfig.maxOutputTokens,16384);
+    if(review)assert.deepEqual(payload.generationConfig.responseSchema.properties.claims.items.properties.sourceIds.items.enum,['0:0']);
+    return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(review?{claims:summaryClaims(part).map(c=>({claimId:c.id,verdict:'supported',reason:'',sourceIds:['0:0']})),omissions:[]}:part)}]}}]});
   };
   const job=await enqueueSummary(owner,{id,language:'English',detail:'balanced'});
   await runNextJob(owner,job.id);

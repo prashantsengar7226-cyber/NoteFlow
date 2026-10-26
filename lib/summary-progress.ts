@@ -72,6 +72,7 @@ function progressView(progress: Progress, segments: Segment[]): SummaryProgress 
     completedParts: progress.parts.length,
     totalParts: progress.totalParts,
     state: progress.lockUntil > Date.now() ? 'running' : 'paused',
+    stage: progress.draft ? 'reviewing' : 'drafting',
     // Older releases mislabeled AI 404s as transcription failures. Correct the
     // saved display text without modifying the source or completed summary parts.
     error: progress.error?.startsWith('This video could not be transcribed.')

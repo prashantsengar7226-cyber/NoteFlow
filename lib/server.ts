@@ -507,6 +507,7 @@ function structuredSchema(schema: z.ZodTypeAny): Record<string, unknown> {
     return { type: 'ARRAY', items: structuredSchema(schema.element as z.ZodTypeAny) };
   if (schema instanceof z.ZodNumber) return { type: schema.isInt ? 'INTEGER' : 'NUMBER' };
   if (schema instanceof z.ZodBoolean) return { type: 'BOOLEAN' };
+  if (schema instanceof z.ZodEnum) return { type: 'STRING', enum: schema.options };
   return { type: 'STRING' };
 }
 export async function ai<T>(
@@ -531,7 +532,7 @@ export async function ai<T>(
     const generated = await vertexGenerate({
       systemInstruction: { parts: [{ text: systemInstruction }] },
       contents: [{ role: 'user', parts: [{ text: content }] }],
-      generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 8192, responseSchema: structuredSchema(schema) },
+      generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 16384, responseSchema: structuredSchema(schema) },
     }, timeout);
     const accepted = await validateAIOutput(generated, schema, source);
     onModel?.(accepted.model);
@@ -661,7 +662,7 @@ Use logical chapters in source order (up to ${detail === 'detailed' ? '12' : '6'
     (context ? 'BOUNDARY CONTEXT (reference only):\n' + context.boundary + '\nCURRENT PART:\n' : '') + sourceText(chunk),
     summarySchema,
     chunk,
-    90000,
+    usesVertex() ? 120000 : 90000,
     (model) => {
       actualModel = model;
     },

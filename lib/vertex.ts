@@ -66,8 +66,16 @@ export async function vertexGenerate(payload: Record<string,unknown>, timeout: n
     .bind(c.project,day,c.total,c.daily).first();
   if (!reserved) throw new AppError(429,'VERTEX_CAP','The site AI processing budget is paused. Your source notes are still available.',Math.ceil(((day+1)*86400000-Date.now())/1000));
   const host = c.location === 'global' ? 'aiplatform.googleapis.com' : `${c.location}-aiplatform.googleapis.com`;
+  // Bounded summary chunks retain a separate semantic review. Explicit LOW
+  // thinking leaves more of the output budget and deadline for the actual JSON.
+  const requestPayload = ['gemini-3.5-flash','gemini-3.8-flash'].includes(c.model) ? {
+    ...payload,
+    generationConfig: { ...(payload.generationConfig as Record<string,unknown> ?? {}), thinkingConfig: { thinkingLevel: 'LOW' } },
+  } : payload;
+  const started = Date.now();
   const response = await providerFetch(`https://${host}/v1/projects/${c.project}/locations/${c.location}/publishers/google/models/${c.model}:generateContent`, {
-    method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify(payload),
-  },'Vertex AI',Math.min(timeout,60000));
-  return {response,provider:'gemini' as const,model:c.model,elapsedMs:0};
+    method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify(requestPayload),
+  },'Vertex AI',Math.min(timeout,120000));
+  console.info(JSON.stringify({event:'vertex_response',model:c.model,elapsedMs:Date.now()-started,status:response.status}));
+  return {response,provider:'gemini' as const,model:c.model,elapsedMs:Date.now()-started};
 }

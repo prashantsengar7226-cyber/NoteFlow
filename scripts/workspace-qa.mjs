@@ -112,20 +112,32 @@ try {
   await api(a.page,'/api/ai-jobs','POST',{id:fallbackId,language:'Hindi',detail:'balanced'});
   await a.page.goto(base+'/');
   await a.page.getByRole('heading',{name:'Source fallback fixture',exact:true}).click();
-  await a.page.getByRole('heading',{name:'Source notes are ready',exact:true}).waitFor();
-  await a.page.getByText('Source notes · no AI',{exact:true}).waitFor();
+  await a.page.getByRole('heading',{name:'AI summary is not ready yet',exact:true}).waitFor();
+  assert.equal(await a.page.getByRole('heading',{name:'Overview',exact:true}).count(),0);
+  assert.equal(await a.page.locator('.takeaways').count(),0);
   assert.equal((await api(b.page,'/api/notes?id='+fallbackId)).status,404);
   assert.equal((await api(a.page,'/api/export-batch','POST',{ids:[fallbackId]})).status,200);
   for(const width of [1440,390]){
     await a.page.setViewportSize({width,height:1000});
-    await a.page.getByLabel('Source notes ready').scrollIntoViewIfNeeded();
+    await a.page.getByLabel('AI summary not ready').scrollIntoViewIfNeeded();
     await a.page.screenshot({path:`audit/source-fallback-${width}.png`});
     assert.equal(await a.page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
   }
-  await a.page.getByRole('button',{name:'Read full transcript',exact:true}).click();
+  await a.page.getByRole('button',{name:'View source transcript',exact:true}).click();
   await a.page.getByRole('heading',{name:'Source transcript',exact:true}).waitFor();
+  await a.page.locator('.source-excerpts summary').click();
+  assert.ok((await a.page.locator('.source-excerpts .takeaways').innerText()).includes('The square is blue.'));
+  const partialDb=createClient({url:dbUrl});
+  const checked={title:'Checked result',overview:'Checked AI fixture.',keyPoints:[{text:'The square is blue.',segmentIds:[0]}],chapters:[],model:'fixture',sourceChecked:true};
+  await partialDb.execute({sql:'INSERT INTO artifacts(note_id,kind,content,created_at) VALUES(?,?,?,?) ON CONFLICT(note_id,kind) DO UPDATE SET content=excluded.content',args:[fallbackId,'__summary_progress',JSON.stringify({runId:crypto.randomUUID(),language:'Hindi',detail:'balanced',parts:[checked],totalParts:2,chunkVersion:3,lockUntil:0}),Date.now()]});
+  partialDb.close();
+  await a.page.reload();
+  await a.page.getByRole('heading',{name:'Source fallback fixture',exact:true}).click();
+  await a.page.getByText('Checked AI fixture.',{exact:true}).waitFor();
+  await a.page.getByText('Partial AI summary',{exact:true}).waitFor();
+  assert.equal(await a.page.locator('.source-excerpts').count(),0);
   await api(a.page,'/api/notes','DELETE',{id:fallbackId});
-  results.push({check:'unavailable AI produces labelled source notes, private batch export and full-transcript access on desktop/mobile',pass:true});
+  results.push({check:'unavailable AI shows no false result; excerpts live only in Transcript; checked partial AI overrides fallback on desktop/mobile',pass:true});
   await a.page.setViewportSize({width:1440,height:1000});
   const created=await api(a.page,'/api/notes','POST',{kind:'text',title:malicious,text:'Learning is more effective when practice is spaced over time. Recall improves retention. '.repeat(20)});
   assert.equal(created.status,201);const id=created.data.note.id;

@@ -110,6 +110,8 @@ type Artifacts = {
 };
 type Message = { role: string; answer: string; segmentIds?: number[] };
 type Status = {
+  accountId?: string;
+  summaryConnection?: {provider:string;model:string};
   ai: boolean;
   provider: 'gemini' | 'groq' | 'openrouter' | 'router';
   providers: ('gemini' | 'groq' | 'openrouter')[];
@@ -251,8 +253,8 @@ export default function Workspace({ name }: { name: string }) {
   const summaryInQueue = !!note && queuedNoteIds.includes(note.id);
   const [summaryProgress, setSummaryProgress] = useState<SummaryProgress | null>(null);
   const sourceFallback = !!note?.summary?.fallback;
-  const visibleSummary = sourceFallback ? note?.summary : summaryProgress?.preview ?? note?.summary;
-  const partialSummary = !sourceFallback && !!summaryProgress?.preview;
+  const visibleSummary = summaryProgress?.preview ?? (sourceFallback ? null : note?.summary);
+  const partialSummary = !!summaryProgress?.preview;
   const [importOpen, setImportOpen] = useState(false),
     [importKind, setImportKind] = useState('youtube'),
     [source, setSource] = useState(''),
@@ -552,13 +554,13 @@ export default function Workspace({ name }: { name: string }) {
     setCheckingAI(true);
     setDiagnostic('');
     try {
-      const result = await api<{ model: string; latencyMs: number }>(
+      const result = await api<{ model: string; connection:string; latencyMs: number }>(
         '/api/diagnostics',
         'POST',
         {},
       );
       setDiagnostic(
-        `Connected · ${result.model} · ${(result.latencyMs / 1000).toFixed(1)}s. Short test passed; long sources take longer.`,
+        `Connected · ${result.connection} · ${result.model} · ${(result.latencyMs / 1000).toFixed(1)}s. Short test passed; long sources take longer.`,
       );
     } catch (error) {
       setDiagnostic((error as Error).message);
@@ -1201,7 +1203,7 @@ export default function Workspace({ name }: { name: string }) {
                 </IconBox>
                 <div>
                   <h3>AI generation · {aiProviderName}</h3>
-                  <p>Summaries, questions, study tools, and translations.</p>
+                  <p>Summary connection: {status?.summaryConnection?.provider} · {status?.summaryConnection?.model}</p>
                 </div>
                 <span className={`status-pill ${status?.ai ? 'connected' : 'pending'}`}>
                   {status?.ai ? 'Key configured' : 'Setup needed'}
@@ -1230,8 +1232,9 @@ export default function Workspace({ name }: { name: string }) {
                   {checkingAI ? <Spinner /> : <Zap size={16} />}Test AI connection
                 </button>
                 <small>
-                  Uses one daily AI call. Tests a short answer and its source reference.
+                  Tests the active summary connection with a short answer and source reference. Provider usage applies.
                 </small>
+                <small>Account ID: {status?.accountId}</small>
                 {diagnostic && (
                   <p role="status" className="connection-result">
                     {diagnostic}
@@ -1513,27 +1516,29 @@ export default function Workspace({ name }: { name: string }) {
                             compact={!!visibleSummary}
                           />
                         )}
-                        {sourceFallback && (
-                          <section className="summary-progress" aria-label="Source notes ready">
+                        {sourceFallback && !visibleSummary && (
+                          <section className="summary-progress" aria-label="AI summary not ready">
                             <div role="status">
-                              <h2>Source notes are ready</h2>
-                              <p>{sourceNotesReason(note.summary!.fallback!.reason)} These excerpts use the original transcript and require no AI quota. They keep the source language. AI enhancement can continue separately.</p>
+                              <h2>AI summary is not ready yet</h2>
+                              <p>{sourceNotesReason(note.summary!.fallback!.reason)} No checked AI summary is available yet. Your original transcript and selected excerpts are available in the Transcript tab.</p>
                             </div>
-                            <button className="secondary" onClick={() => setTab('transcript')}><FileText size={15} /> Read full transcript</button>
+                            <button className="secondary" onClick={() => setTab('transcript')}><FileText size={15} /> View source transcript</button>
                           </section>
                         )}
                         {summaryProgress && (
                           <section className="summary-progress" aria-label="Summary progress">
                             <div role="status" aria-live="polite">
                               <h2>
-                                {sourceFallback ? summaryInQueue ? 'AI enhancement is queued' : 'AI enhancement is paused' : summaryInQueue ? 'Your summary is queued for automatic recovery' : summaryPending || summaryProgress.state === 'running'
+                                {summaryPending || summaryProgress.state === 'running'
                                   ? 'Your summary is in progress'
+                                  : summaryInQueue ? 'Your summary is queued for automatic recovery'
                                   : 'Your summary is paused'}
                               </h2>
                               <p>
                                 {summaryProgress.completedParts} of {summaryProgress.totalParts}{' '}
-                                parts saved.
-                                {sourceFallback ? ' Checked AI parts are saved. Your source notes are shown below.' : partialSummary
+                                parts checked and saved.
+                                {summaryProgress.stage === 'reviewing' && ' A draft is ready and is being checked against the transcript before publication.'}
+                                {partialSummary
                                   ? ' The partial summary is shown below. Remaining sections have not been summarized yet.'
                                   : ' Your source is saved. Continue to create the summary.'}
                               </p>
@@ -1565,7 +1570,7 @@ export default function Workspace({ name }: { name: string }) {
                                     ? partialSummary
                                       ? 'Partial AI summary'
                                       : 'AI summary'
-                                    : sourceFallback ? 'Source notes · no AI' : 'Basic · source excerpts'}
+                                    : 'Basic · source excerpts'}
                                 </span>
                                 <button
                                   className="icon-button"
@@ -1580,8 +1585,8 @@ export default function Workspace({ name }: { name: string }) {
                               <Sparkles size={21} />
                               <p>{visibleSummary.overview}</p>
                             </div>
-                            {note.summary?.sourceChecks && <p className="source-check-note">Source review: {note.summary.sourceChecks.checkedParts} of {note.summary.sourceChecks.totalParts} parts checked. Checks compare notes with the transcript; they do not independently verify facts or analyze video visuals.</p>}
-                              <h2>{sourceFallback ? 'Selected source excerpts' : 'Key takeaways'}</h2>
+                            {visibleSummary.sourceChecks && <p className="source-check-note">Source review: {visibleSummary.sourceChecks.checkedParts} of {visibleSummary.sourceChecks.totalParts} displayed parts checked. Checks compare notes with the transcript; they do not independently verify facts or analyze video visuals.</p>}
+                              <h2>Key takeaways</h2>
                             <ol className="takeaways">
                               {visibleSummary.keyPoints.map((p, i) => (
                                 <li key={i}>
@@ -1645,7 +1650,7 @@ export default function Workspace({ name }: { name: string }) {
                           </>
                         ) : summaryPending ? (
                           <SummarySkeleton />
-                        ) : summaryProgress ? null : (
+                        ) : summaryProgress || sourceFallback ? null : (
                           <Empty
                             icon={<Sparkles size={27} />}
                             title="Make the main ideas stand out"
@@ -1706,6 +1711,17 @@ export default function Workspace({ name }: { name: string }) {
                     )}
                     {tab === 'transcript' && (
                       <>
+                        {sourceFallback && (
+                          <details className="source-excerpts">
+                            <summary>Selected transcript excerpts · not an AI summary</summary>
+                            <p>These are automatically selected passages from the beginning, middle and end. They may include greetings and omit important details. The full transcript follows below.</p>
+                            <ol className="takeaways">
+                              {note.summary!.keyPoints.map((point, index) => (
+                                <li key={index}><div><p>{point.text}</p><div className="citations">{citations(point.segmentIds)}</div></div></li>
+                              ))}
+                            </ol>
+                          </details>
+                        )}
                         <div className="section-top">
                           <h2>Source transcript</h2>
                           <button className="secondary" onClick={() => exportNote('txt')}>

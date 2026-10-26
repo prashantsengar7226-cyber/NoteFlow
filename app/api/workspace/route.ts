@@ -6,7 +6,7 @@ import { nextReset } from '@/lib/plans';
 import { publicBilling } from '@/lib/billing';
 import { personalAIStatus, withOwnerAI } from '@/lib/personal-ai';
 import { featureRouting, weeklyUsage } from '@/lib/ai-policy';
-import { vertexReady } from '@/lib/vertex';
+import { vertexReady, vertexConfig } from '@/lib/vertex';
 export async function GET(r: Request) {
   try {
     const owner = await guard(r);
@@ -15,6 +15,9 @@ export async function GET(r: Request) {
     const connection = await personalAIStatus(owner);
     const plan = await account(owner);
     return json({
+      accountId: owner,
+      summaryConnection: connection.mode === 'personal' ? { provider: 'Personal AI', model: c.model }
+        : featureRouting() && vertexReady() ? { provider: 'Vertex AI', model: vertexConfig().model } : { provider: 'Shared AI', model: c.model },
       ai: !!c.aiKey || (featureRouting() && vertexReady()),
       featureRouting: featureRouting(),
       weeklyAI: featureRouting() ? await weeklyUsage(owner) : null,

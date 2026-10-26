@@ -18,6 +18,7 @@ export type SummaryProgress = {
   completedParts: number;
   totalParts: number;
   state: 'running' | 'paused';
+  stage?: 'drafting' | 'reviewing';
   error: string | null;
   preview: Summary | null;
 };
