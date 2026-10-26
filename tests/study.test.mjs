@@ -4,6 +4,20 @@ import { summaryChunks, summarySourceChunks, sourceTokenEstimate, summaryBoundar
 import { createStudyPdf, createSummaryCollectionPdf } from '../.test-runtime/pdf.mjs';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { readFile, writeFile } from 'node:fs/promises';
+import { revisionTopics } from '../.test-runtime/revision-guide.mjs';
+
+test('revision topics preserve every claim and reference, including gaps and nonsequential IDs', () => {
+  const segments=[{id:90},{id:4},{id:71},{id:2}];
+  const points=[{text:'Before the first topic',segmentIds:[90]}, {text:'First topic fact',segmentIds:[4]}, {text:'Cross-topic fact',segmentIds:[71,2]}, {text:'No valid citation',segmentIds:[123]}];
+  const summary={chapters:[{title:'Later',segmentId:2,summary:'Later explanation'}, {title:'Earlier',segmentId:4,summary:'Earlier explanation'}],keyPoints:points};
+  const result=revisionTopics(summary,segments);
+  assert.deepEqual(result.map(t=>t.title),['More revision points','Earlier','Later']);
+  assert.equal(result.flatMap(t=>t.points).length,points.length);
+  assert.deepEqual(new Set(result.flatMap(t=>t.points)),new Set(points));
+  assert.deepEqual(result[1].points[1].segmentIds,[71,2]);
+  assert.deepEqual(summary.keyPoints,points);
+  assert.equal(revisionTopics({chapters:[],keyPoints:[]},[]).length,0);
+});
 
 test('summary chunking preserves every character and original reference, including oversized segments', () => {
   const segments = [

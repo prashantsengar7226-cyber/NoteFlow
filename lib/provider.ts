@@ -277,7 +277,10 @@ async function compatibleGenerate(
       response_format: schema && (!isGroq || ['openai/gpt-oss-120b','openai/gpt-oss-20b','qwen/qwen3.8-27b','meta-models/muse-spark-open'].includes(candidate.model))
         ? { type: 'json_schema', json_schema: { name: 'noteflow_output', strict: true, schema } }
         : { type: 'json_object' },
-      ...(!isGroq && (schema || candidate.freeOnly) ? { provider: { require_parameters: !!schema, ...(candidate.freeOnly ? { max_price: { prompt: 0, completion: 0, request: 0 } } : {}) } } : {}),
+      ...(!isGroq && (schema || candidate.freeOnly) ? { provider: { require_parameters: !!schema, ...(candidate.freeOnly ? { sort: 'throughput', max_price: { prompt: 0, completion: 0, request: 0 } } : {}) } } : {}),
+      // Leave output capacity for the notes. The separate source review remains
+      // mandatory; do not consume the whole deadline on default deep reasoning.
+      ...(!isGroq && candidate.freeOnly ? { reasoning: { effort: 'low' } } : {}),
       max_tokens: 8192,
       temperature: 0.2,
     }),

@@ -28,6 +28,7 @@ type Progress = {
   errorCode?: string;
   legacyPrefix?: { version: number; count: number };
   draft?: SummaryPart;
+  rejectedDraft?: SummaryPart;
   reviewIssues?: string[];
   evidenceIssues?: string[];
 };
@@ -224,7 +225,7 @@ export async function summaryStep(note: NoteRow, owner: string, segments: Segmen
       input.detail,
       progress.parts.length,
       chunks.length,
-      { source: segments, boundary: summaryBoundaryContext(chunks, progress.parts.length), reviewIssues: input.qualityCheck ? progress.reviewIssues : undefined },
+      { source: segments, boundary: summaryBoundaryContext(chunks, progress.parts.length), reviewIssues: input.qualityCheck ? progress.reviewIssues : undefined, rejectedDraft: input.qualityCheck ? progress.rejectedDraft : undefined },
     );
     if (input.qualityCheck && !progress.draft) {
       const staged = { ...progress, draft: part, evidenceIssues: undefined, error: null, errorCode: undefined, lockUntil: 0 };
@@ -234,7 +235,7 @@ export async function summaryStep(note: NoteRow, owner: string, segments: Segmen
       return response(staged);
     }
     if (input.qualityCheck) part = await checkSummaryPart(part, chunks[progress.parts.length], summaryBoundaryContext(chunks, progress.parts.length), input.detail, progress.evidenceIssues);
-    const next = { ...progress, draft: undefined, reviewIssues: undefined, evidenceIssues: undefined, parts: [...progress.parts, part], error: null, errorCode: undefined, lockUntil: 0 };
+    const next = { ...progress, draft: undefined, rejectedDraft: undefined, reviewIssues: undefined, evidenceIssues: undefined, parts: [...progress.parts, part], error: null, errorCode: undefined, lockUntil: 0 };
     const serialized = JSON.stringify(next);
     // Leave room for the source and annotations in the note's database row.
     const summary = mergeSummaryParts(next.parts, segments, input.language);
@@ -276,6 +277,7 @@ export async function summaryStep(note: NoteRow, owner: string, segments: Segmen
         JSON.stringify({
           ...progress,
           draft: error instanceof AppError && error.code === 'QUALITY_REVIEW' ? undefined : progress.draft,
+          rejectedDraft: error instanceof SummaryQualityError ? progress.draft : progress.rejectedDraft,
           reviewIssues: error instanceof SummaryQualityError ? error.issues : progress.reviewIssues,
           evidenceIssues: error instanceof SummaryEvidenceError ? error.issues : error instanceof SummaryQualityError ? undefined : progress.evidenceIssues,
           lockUntil: 0,

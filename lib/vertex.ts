@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { env } from './platform';
 import { AppError } from './core';
 import { providerFetch, providerJson } from './provider';
+import { usesVertex } from './ai-policy';
 
 const vars = () => env as unknown as Record<string,string | undefined>;
 const localADC = () => !vars().VERCEL && vars().VERTEX_ALLOW_LOCAL_ADC === 'true' && !!vars().VERTEX_LOCAL_ADC_PATH;
@@ -54,6 +55,8 @@ async function accessToken() {
   return cached.token;
 }
 export async function vertexGenerate(payload: Record<string,unknown>, timeout: number) {
+  // Check at the final paid boundary too, including jobs and internal callers.
+  if (!usesVertex()) throw new AppError(403, 'VERTEX_ADMIN_ONLY', 'Paid Vertex AI is available only to an administrator.');
   const c = vertexConfig();
   const token = await accessToken();
   // Every upstream attempt (including failed generations and reviews) counts.

@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process';
 const dest = new URL('../.test-runtime/', import.meta.url);
 await mkdir(dest, { recursive: true });
 const sources = {
+  'lib/revision-guide.ts':'revision-guide.mjs',
   'lib/api-client.ts':'api-client.mjs',
   'lib/ai-policy.ts':'ai-policy.mjs',
   'lib/vertex.ts':'vertex.mjs',
@@ -70,7 +71,7 @@ await writeFile(
   new URL('harness.mjs', dest),
   await readFile(new URL('./harness.mjs', import.meta.url)),
 );
-const result = process.argv.includes('--live-vertex') ? spawnSync(process.execPath,['tests/live-vertex.mjs',...process.argv.slice(2)],{stdio:'inherit'}) : spawnSync(
+const result = process.argv.includes('--live-free-revision') ? spawnSync(process.execPath,['tests/live-free-revision.mjs',...process.argv.slice(2)],{stdio:'inherit'}) : process.argv.includes('--live-vertex') ? spawnSync(process.execPath,['tests/live-vertex.mjs',...process.argv.slice(2)],{stdio:'inherit'}) : spawnSync(
   process.execPath,
   process.argv.includes('--live-repair') ? ['--experimental-transform-types', 'tests/live-repair.mjs', ...process.argv.slice(2)] : process.argv.includes('--live-source-review') ? ['--experimental-transform-types', 'tests/live-source-review.mjs', ...process.argv.slice(2)] : process.argv.includes('--live-queue') ? ['--experimental-transform-types', 'tests/live-queue.mjs', ...process.argv.slice(2)] : process.argv.includes('--verify-video-parts') ? ['--experimental-transform-types', 'tests/real-video-parts.mjs', ...process.argv.slice(2)] : process.argv.includes('--real-video-audit') ? ['--experimental-transform-types', 'tests/real-video-audit.mjs', ...process.argv.slice(2)] : process.argv.includes('--quality-benchmark') ? ['--experimental-transform-types', 'tests/quality-benchmark.mjs'] : process.argv.includes('--live-summary') ? ['--experimental-transform-types', 'tests/live-summary.mjs'] : [
     '--experimental-transform-types',

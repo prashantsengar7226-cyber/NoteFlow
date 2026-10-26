@@ -133,7 +133,23 @@ try {
   partialDb.close();
   await a.page.reload();
   await a.page.getByRole('heading',{name:'Source fallback fixture',exact:true}).click();
+  await a.page.getByRole('heading',{name:'Your revision guide',exact:true}).waitFor();
+  await a.page.locator('.revision-overview summary').click();
   await a.page.getByText('Checked AI fixture.',{exact:true}).waitFor();
+  for(const width of [1440,390]){
+    await a.page.setViewportSize({width,height:1000});
+    await a.page.locator('.revision-guide').scrollIntoViewIfNeeded();
+    await a.page.screenshot({path:`audit/revision-guide-${width}.png`});
+    assert.equal(await a.page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  }
+  await a.page.getByLabel('Find a topic or fact').fill('no matching topic');
+  await a.page.getByText('No topics match',{exact:false}).waitFor();
+  await a.page.getByLabel('Find a topic or fact').fill('');
+  await a.page.getByRole('button',{name:'Practise recall',exact:true}).click();
+  assert.equal(await a.page.locator('.revision-topic details').getAttribute('open'),null);
+  await a.page.locator('.revision-topic summary').click();
+  await a.page.locator('.revision-facts').getByText('The square is blue.',{exact:true}).waitFor();
+  await a.page.getByRole('button',{name:'Read notes',exact:true}).click();
   await a.page.getByText('Partial AI summary',{exact:true}).waitFor();
   assert.equal(await a.page.locator('.source-excerpts').count(),0);
   await api(a.page,'/api/notes','DELETE',{id:fallbackId});
@@ -186,6 +202,7 @@ try {
     await route.fulfill({status:202,contentType:'application/json',body:JSON.stringify({job:{id:crypto.randomUUID(),noteId:id,state:'completed',nextAt:0,completedParts:2,totalParts:2,errorCode:null,background:false}})});
   });
   await a.page.getByLabel('Summary progress').getByRole('button',{name:'Resume summary',exact:true}).click();
+  await a.page.locator('.revision-overview summary').click();
   await a.page.getByText('Completed fixture summary.',{exact:true}).waitFor();
   assert.equal(await a.page.locator('.summary-error').count(),0);
   assert.equal(await a.page.getByRole('button',{name:'Resume summary',exact:true}).count(),0);

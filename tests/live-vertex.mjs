@@ -19,7 +19,8 @@ globalThis.fetch=async(...args)=>{
  return response;
 };
 Object.assign(env,{AI_FEATURE_ROUTING:'true',VERTEX_ENABLED:'true',VERTEX_PROJECT_ID:local.VERTEX_PROJECT_ID,VERTEX_SERVICE_ACCOUNT_JSON:local.VERTEX_SERVICE_ACCOUNT_JSON,VERTEX_LOCATION:'global',VERTEX_MODEL:process.argv.find(x=>x.startsWith('--model='))?.slice(8)||'gemini-3.8-flash',VERTEX_CREDIT_EXPIRES_AT:'2027-01-18T00:00:00Z',VERTEX_DAILY_REQUEST_CAP:process.argv.includes('--note')?'60':'8',VERTEX_TOTAL_REQUEST_CAP:process.argv.includes('--note')?'60':'8'});
-const owner='vertex-live-synthetic',id=crypto.randomUUID();
+const owner='12345678-1234-1234-1234-123456789abc',id=crypto.randomUUID();
+env.AI_ADMIN_USER_IDS=owner; // Temporary harness only; never changes the production allowlist.
 const englishSegments=[{id:0,start:0,text:'A classroom experiment compared two groups of ten students. Group A practiced recall on Monday and Thursday. Group B reread the lesson only on Thursday.'},{id:1,start:30,text:'On Friday, Group A averaged eight correct answers out of ten. Group B averaged six. This small experiment does not prove that spaced practice works for everyone.'}];
 const fixture = process.argv.includes('--note') ? JSON.parse(await readFile(process.argv.includes('--resume-test')?'audit/production/real-note-test-progress.json':'audit/production/current-note-review-fixture.json','utf8')) : null;
 const segments = fixture?.segments ?? (process.argv.includes('--hindi') ? JSON.parse(await readFile('tests/fixtures/hindi-facts.json','utf8')) : englishSegments);

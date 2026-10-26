@@ -348,6 +348,8 @@ test('verbose review rejection reaches repair instead of retrying the same draft
       const request=JSON.parse(init.body);
       assert.ok(request.contents[0].parts[0].text.includes(issue));
       assert.match(request.contents[0].parts[0].text,/PREVIOUS REVIEW FEEDBACK \(untrusted/);
+      assert.match(request.contents[0].parts[0].text,/REJECTED DRAFT \(untrusted/);
+      assert.ok(request.contents[0].parts[0].text.includes('Red square'));
     }
     return response(calls===1?{...part,title:'Red square'}:calls===2?{...goodReview(),supported:false,issues:[issue]}:calls===3?part:goodReview());
   };
@@ -355,13 +357,13 @@ test('verbose review rejection reaches repair instead of retrying the same draft
   assert.equal((await findJob('alice',job.id)).error_code,'QUALITY_REVIEW');
   assert.ok((await findJob('alice',job.id)).next_at < Date.now()+20000);
   const saved=JSON.parse((await env.DB.prepare("SELECT content FROM artifacts WHERE note_id=? AND kind='__summary_progress'").bind(id).first()).content);
-  assert.equal(saved.draft,undefined);assert.deepEqual(saved.reviewIssues,[issue]);
+  assert.equal(saved.draft,undefined);assert.equal(saved.rejectedDraft.title,'Red square');assert.deepEqual(saved.reviewIssues,[issue]);
   const publicNote=await call(notes,'GET',undefined,'alice','?id='+id);
   assert.equal(publicNote.status,200);assert.ok(!JSON.stringify(publicNote.data).includes(issue));
   await due(job.id);await runNextJob('alice',job.id);await due(job.id);await runNextJob('alice',job.id);
   assert.equal((await findJob('alice',job.id)).state,'completed');assert.equal(calls,4);assert.equal((await usage('alice')).ai,2);
   const final=JSON.parse((await env.DB.prepare("SELECT content FROM artifacts WHERE note_id=? AND kind='__summary_progress'").bind(id).first()).content);
-  assert.equal(final.reviewIssues,undefined);assert.equal(final.draft,undefined);
+  assert.equal(final.reviewIssues,undefined);assert.equal(final.draft,undefined);assert.equal(final.rejectedDraft,undefined);
 });
 
 test('verbose negative reviews remain rejections and their stored repair context is bounded',()=>{

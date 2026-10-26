@@ -1,4 +1,25 @@
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;450;500;550;600;650;700&family=Manrope:wght@400;500;600;650;700;750;800&display=swap');
+.revision-guide { color: var(--ink); line-height: 1.7; overflow-wrap: anywhere; }
+.revision-intro, .revision-hint { max-width: 72ch; margin: 12px 0 20px; }
+.revision-controls { display: flex; align-items: end; gap: 16px; margin: 24px 0; }
+.revision-controls label { flex: 1; font-weight: 600; }
+.revision-controls input { display: block; margin-top: 6px; }
+.revision-controls input::placeholder { color: #5c6375; }
+.revision-controls button { flex-shrink: 0; min-height: 44px; }
+.revision-overview { margin: 20px 0; }
+.revision-overview p { white-space: pre-line; max-width: 72ch; padding-top: 12px; }
+.revision-guide summary { cursor: pointer; padding: 10px 0; color: #465270; }
+.revision-guide summary:focus-visible { outline: 3px solid #7b8ee8; outline-offset: 3px; }
+.revision-index { display: flex; flex-wrap: wrap; gap: 8px 20px; padding: 18px 0; border-block: 1px solid var(--line); }
+.revision-index a { text-underline-offset: 4px; font-weight: 600; }
+.revision-topic { scroll-margin-top: 90px; padding: 30px 0; border-bottom: 1px solid var(--line); }
+.revision-topic h3 { font-size: 20px; line-height: 1.4; margin-bottom: 8px; }
+.revision-explanation p, .revision-facts p { max-width: 72ch; }
+.revision-explanation { margin: 8px 0 20px; }
+.revision-facts { margin: 0; padding-left: 22px; }
+.revision-facts li { padding: 10px 0 14px 6px; }
+.revision-facts .citations, .revision-explanation .citations { margin-top: 8px; }
+@media (max-width: 600px) { .revision-controls { align-items: stretch; flex-direction: column; } .revision-topic h3 { font-size: 18px; } }
 :root {
   --bg: #fafafb;
   --surface: #fff;

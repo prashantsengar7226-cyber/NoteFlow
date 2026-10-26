@@ -44,7 +44,7 @@ export function AISettings({onUpdated,featureRouting}:{onUpdated:()=>void;featur
   }
   return <section className="settings-panel personal-ai-settings" aria-labelledby="personal-ai-title">
     <h2 id="personal-ai-title">Choose your AI connection</h2>
-    <p><strong>{connection?.mode==='personal'?`Personal AI · ${connection.provider} · ${connection.model}`:featureRouting?'NoteFlow AI · weekly summaries and insights; small tools without a daily cap':'NoteFlow AI · 20 operations per day'}</strong></p>
+    <p><strong>{connection?.mode==='personal'?`Personal AI · ${connection.provider} · ${connection.model}`:featureRouting?'NoteFlow AI · free models for study tools; Vertex summaries restricted to admins':'NoteFlow AI · 20 operations per day'}</strong></p>
     <p>Connect your own key for no NoteFlow daily AI cap. Your provider’s limits and charges still apply. Request-rate, source-size and YouTube import limits remain in place. A personal key does not automatically improve accuracy.</p>
     {connection && !connection.enabled ? <p role="status">Personal connections will be available after the site owner completes secure key-storage setup.</p> : <form onSubmit={e=>{e.preventDefault();void change();}}>
       <label>Provider<select value={provider} disabled={locked||!connection} onChange={e=>{setProvider(e.target.value);setKey('');setUseSaved(true);resetCatalog();}}><option value="gemini">Gemini</option><option value="groq">Groq</option><option value="openrouter">OpenRouter</option></select></label>

@@ -5,7 +5,7 @@ import { guard, json, config, handleError, usage, account } from '@/lib/server';
 import { nextReset } from '@/lib/plans';
 import { publicBilling } from '@/lib/billing';
 import { personalAIStatus, withOwnerAI } from '@/lib/personal-ai';
-import { featureRouting, weeklyUsage } from '@/lib/ai-policy';
+import { featureRouting, weeklyUsage, isAIAdmin } from '@/lib/ai-policy';
 import { vertexReady, vertexConfig } from '@/lib/vertex';
 export async function GET(r: Request) {
   try {
@@ -14,14 +14,15 @@ export async function GET(r: Request) {
     const c = config();
     const connection = await personalAIStatus(owner);
     const plan = await account(owner);
+    const vertex = featureRouting() && isAIAdmin(owner) && vertexReady();
     return json({
       accountId: owner,
       summaryConnection: connection.mode === 'personal' ? { provider: 'Personal AI', model: c.model }
-        : featureRouting() && vertexReady() ? { provider: 'Vertex AI', model: vertexConfig().model } : { provider: 'Shared AI', model: c.model },
-      ai: !!c.aiKey || (featureRouting() && vertexReady()),
+        : vertex ? { provider: 'Vertex AI · admin', model: vertexConfig().model } : { provider: 'Free AI', model: c.model },
+      ai: !!c.aiKey || vertex,
       featureRouting: featureRouting(),
       weeklyAI: featureRouting() ? await weeklyUsage(owner) : null,
-      vertex: featureRouting() && vertexReady(),
+      vertex,
       connection,
       provider: c.provider,
       providers: c.candidates.map(candidate => candidate.provider),

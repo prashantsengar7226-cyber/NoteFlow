@@ -64,6 +64,7 @@ import {
 import { PdfBatch } from './pdf-batch';
 import { AISettings } from './ai-settings';
 import { SummaryQueue } from './summary-queue';
+import { RevisionGuide } from './revision-guide';
 import { queuedSummary } from '@/lib/queue-client';
 import { extractPdfText } from '@/lib/pdf-import';
 import { StudyControls } from './study-controls';
@@ -122,6 +123,7 @@ type Status = {
   limits: { characters: number; batch: number; uploadMB: number; notes: number };
   dailyLimits: { ai: number | null; youtube: number };
   featureRouting?: boolean;
+  vertex?: boolean;
   weeklyAI?: { used:number; limit:number|null; resetAt:number } | null;
   connection?: {mode:string;enabled:boolean};
   usage: { ai: number; youtube: number };
@@ -1053,16 +1055,17 @@ export default function Workspace({ name }: { name: string }) {
                 : 'All available tools, included.'}
             </p>
             <div className="sidebar-usage-label">
-              <span>{status?.featureRouting ? 'Summaries & insights this week' : 'AI operations today'}</span>
+              <span>{status?.featureRouting ? 'AI access' : 'AI operations today'}</span>
               <strong>
-                {status?.connection?.mode === 'personal' ? 'Personal key' : status?.featureRouting ? (status.weeklyAI?.limit === null ? 'Admin · no user cap' : `${status.weeklyAI?.used ?? 0} / 20`) : `${status?.usage.ai ?? 0} / ${status?.dailyLimits.ai ?? 20}`}
+                {status?.connection?.mode === 'personal' ? 'Personal key' : status?.featureRouting ? (status.vertex ? 'Vertex · admin' : 'Free models') : `${status?.usage.ai ?? 0} / ${status?.dailyLimits.ai ?? 20}`}
               </strong>
             </div>
-            <progress
+            {!status?.featureRouting && <progress
               max={Math.max(1, status?.featureRouting ? 20 : status?.dailyLimits.ai ?? 20)}
               value={status?.featureRouting ? status.weeklyAI?.used ?? 0 : status?.usage.ai ?? 0}
               aria-label={status?.featureRouting ? 'Weekly summaries and insights allowance used' : 'Daily AI allowance used'}
-            />
+            />}
+            {status?.featureRouting && <p>No daily AI cap. Provider availability and rate limits apply.</p>}
             <button onClick={() => navigate('plans')}>
               View plan & usage <ArrowUpRight size={14} />
             </button>
@@ -1296,11 +1299,11 @@ export default function Workspace({ name }: { name: string }) {
             <section className="settings-panel">
               <h2>{status?.featureRouting ? 'Your usage allowances' : 'Your daily allowance'}</h2>
               <p>
-                {status?.connection?.mode === 'personal' ? 'Personal AI: no NoteFlow daily cap' : status?.featureRouting ? `${status.weeklyAI?.used ?? 0} summary and insight operations reserved or completed this week${status.weeklyAI?.limit === null ? ' · admin: no user cap' : ' out of 20'}` : `${status?.usage.ai ?? 0} of ${status?.dailyLimits.ai ?? 20} NoteFlow AI operations used`} ·{' '}
+                {status?.connection?.mode === 'personal' ? 'Personal AI: no NoteFlow daily cap' : status?.featureRouting ? (status.vertex ? 'Admin: Vertex summaries and insights' : 'Free AI revision guides and study tools') : `${status?.usage.ai ?? 0} of ${status?.dailyLimits.ai ?? 20} NoteFlow AI operations used`} ·{' '}
                 {status?.usage.youtube ?? 0} of {status?.dailyLimits.youtube ?? 3} YouTube imports
                 used.
               </p>
-              {status?.featureRouting ? <p>Small AI tools have no daily operation cap; provider limits and short-term throttles apply. A full summary counts once, including its automatic retries. Weekly allowance resets Monday at 00:00 IST. YouTube imports reset daily. Basic source notes and PDF utilities do not use AI allowance.</p> : <p>
+              {status?.featureRouting ? <p>No NoteFlow daily AI cap. Free providers still have shared quotas and may be unavailable; saved work resumes through the queue. Paid Vertex summaries and insights are restricted to administrators and retain site spending limits. Personal connections use your provider account. YouTube imports reset daily. Source notes and PDF utilities need no AI calls.</p> : <p>
                 {status?.resetAt
                   ? `Next reset: ${new Date(status.resetAt).toLocaleString()}. `
                   : 'Resets at midnight UTC. '}
@@ -1563,7 +1566,7 @@ export default function Workspace({ name }: { name: string }) {
                         {visibleSummary ? (
                           <>
                             <div className="section-top">
-                              <h2 className="summary-heading">Overview</h2>
+                              <h2 className="summary-heading">{visibleSummary.engine === 'ai' ? 'Your revision guide' : 'Source excerpts'}</h2>
                               <div className="summary-tools">
                                 <span className="mode-badge">
                                   {visibleSummary.engine === 'ai'
@@ -1581,6 +1584,7 @@ export default function Workspace({ name }: { name: string }) {
                                 </button>
                               </div>
                             </div>
+                            {visibleSummary.engine === 'ai' ? <RevisionGuide key={note.id} summary={visibleSummary} segments={note.transcript} citations={citations} partial={partialSummary} /> : <>
                             <div className="overview-box">
                               <Sparkles size={21} />
                               <p>{visibleSummary.overview}</p>
@@ -1616,6 +1620,7 @@ export default function Workspace({ name }: { name: string }) {
                                 </div>
                               </>
                             )}
+                            </>}
                             <p className="source-disclaimer">
                               {visibleSummary.engine === 'ai'
                                 ? 'AI can make mistakes. Use the source links to check important details.'
@@ -1657,7 +1662,7 @@ export default function Workspace({ name }: { name: string }) {
                             text="Generate a structured summary, or use basic mode to select key sentences directly from your source."
                           />
                         )}
-                        <p className="generation-estimate">{status?.featureRouting ? 'One weekly operation for this complete summary, including retries' : `${summaryProgress && summaryProgress.language === language && summaryProgress.detail === detail ? summaryProgress.totalParts - summaryProgress.completedParts : summarySourceChunks(note.transcript, detail).length} AI operations for this summary`} · {status?.connection?.mode === 'personal' ? 'no NoteFlow cap; provider limits apply' : status?.featureRouting ? (status.weeklyAI?.limit === null ? 'admin: no user cap' : `${Math.max(0,20-(status.weeklyAI?.used ?? 0))} available this week`) : `${Math.max(0, (status?.dailyLimits.ai ?? 20) - (status?.usage.ai ?? 0))} available today` }. Detailed keeps smaller sections for more thorough notes.</p>
+                        <p className="generation-estimate">{status?.connection?.mode === 'personal' ? 'Your personal AI connection' : status?.vertex ? 'Paid Vertex AI · admin access' : status?.featureRouting ? 'Free AI revision guide · Vertex is locked to admins' : 'AI summary'} · Every transcript part is processed and checked before appearing. Detailed retains more supporting facts. Provider limits can delay completion.</p>
                         <div className="generation-bar">
                           <div className="select-group">
                             <label>
@@ -2380,10 +2385,10 @@ export default function Workspace({ name }: { name: string }) {
                       AI allowance
                     </span>
                     <strong>
-                      {status?.connection?.mode === 'personal' ? 'Personal key' : status?.featureRouting ? (status.weeklyAI?.limit === null ? 'Admin' : Math.max(0,20-(status.weeklyAI?.used ?? 0))) : Math.max(0, (status?.dailyLimits.ai ?? 20) - (status?.usage.ai ?? 0))}
-                      {status?.connection?.mode !== 'personal' && status?.weeklyAI?.limit !== null && <small> / {status?.featureRouting ? 20 : status?.dailyLimits.ai ?? 20}</small>}
+                      {status?.connection?.mode === 'personal' ? 'Personal key' : status?.featureRouting ? (status.vertex ? 'Vertex · admin' : 'Free models') : Math.max(0, (status?.dailyLimits.ai ?? 20) - (status?.usage.ai ?? 0))}
+                      {status?.connection?.mode !== 'personal' && !status?.featureRouting && <small> / {status?.dailyLimits.ai ?? 20}</small>}
                     </strong>
-                    <small>{status?.connection?.mode === 'personal' ? 'Provider limits apply' : status?.featureRouting ? 'Summaries & insights remaining this week' : 'Operations remaining today'}</small>
+                    <small>{status?.connection?.mode === 'personal' || status?.featureRouting ? 'Provider limits apply' : 'Operations remaining today'}</small>
                   </div>
                 </div>
                 <div className="dashboard-create-grid">
@@ -2987,7 +2992,7 @@ export default function Workspace({ name }: { name: string }) {
                   Summary mode
                   <select value={importMode} onChange={(e) => setImportMode(e.target.value)}>
                     <option value="basic">Basic · selected source sentences</option>
-                    <option value="ai">AI · structured insights</option>
+                    <option value="ai">AI · transcript revision guide</option>
                   </select>
                 </label>
                 <label className="field-label">

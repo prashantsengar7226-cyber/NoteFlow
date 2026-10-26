@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { AppError, sourceText, type Segment } from './core';
 import { ai, type SummaryPart } from './server';
-import { usesVertex } from './ai-policy';
+import { usesVertex, featureRouting } from './ai-policy';
 
 export function summaryClaims(part: SummaryPart) {
   return [
@@ -93,7 +93,7 @@ export function validateReview(part: SummaryPart, source: Segment[], review: z.i
   if (missing.length) fail(`Missing evidence for claim IDs: ${missing.join(', ')}. Include all claims, including title, overview and every chapter. Return the complete review, not only these corrections.`);
 }
 export async function checkSummaryPart(part: SummaryPart, source: Segment[], boundary: string, detail = 'balanced', evidenceIssues?: string[]) {
-  if (usesVertex()) {
+  if (usesVertex() || featureRouting()) {
     const catalog=evidenceCatalog(source);
     const claims=summaryClaims(part);
     if(!catalog.length || !claims.length)throw new SummaryEvidenceError('A source review requires source passages and claims.');

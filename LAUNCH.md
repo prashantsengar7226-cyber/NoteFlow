@@ -1,5 +1,7 @@
 # NoteFlow v0.6 first launch
 
+27 October revision-guide policy supersedes earlier allowance descriptions: free AI for regular users; paid Vertex summaries/insights restricted to the existing server admin allowlist. No daily/weekly AI allowance, with provider quotas and abuse controls retained. See [REVISION-GUIDE-RELEASE.md](REVISION-GUIDE-RELEASE.md) for 166 passing checks, browser verification and the unresolved live free-provider completion limit.
+
 26 October production rollout: migration `0003_personal_ai_queue.sql` is applied and the personal-AI/queue release is deployed. A private backup passed an in-memory restore and migration rehearsal. All 134 automated checks and eight deployed HTTP checks pass. Real cron scheduling completed a Gemini summary and its source review without a browser. OpenRouter's automatic retries ran but repeated provider timeouts prevented its test from completing. The verified background-status setting is enabled for the final rollout redeployment. See [PRODUCTION-ROLLOUT.md](PRODUCTION-ROLLOUT.md) for evidence, cleanup and limitations.
 
 Prepared 25 October 2026. The site is live at https://note-flow-blue.vercel.app/. Its public login has been inspected; authenticated acceptance remains local with synthetic users. The latest fixes and verification limits are in QUALITY-AUDIT.md. Payments stay disabled. Email confirmation stays off by product decision; email recovery is unavailable.

@@ -15,7 +15,9 @@ globalThis.fetch=async(input,init={})=>{
     else if(instruction.includes('skeptical source reviewer')) {
       const content=payload.contents[0].parts[0].text;
       const candidate=JSON.parse(content.slice(content.indexOf('\n')+1).split('\nCURRENT SOURCE:')[0]);
-      value={supported:true,importantOmissions:false,issues:[],evidence:candidate.claims.map(c=>({claimId:c.id,segmentId:0,quote:'The square is blue.'}))};
+      value=payload.generationConfig.responseSchema.properties.claims
+        ? {claims:candidate.claims.map(c=>({claimId:c.id,sourceIds:['0:0'],reason:'',verdict:'supported'})),omissions:[]}
+        : {supported:true,importantOmissions:false,issues:[],evidence:candidate.claims.map(c=>({claimId:c.id,segmentId:0,quote:'The square is blue.'}))};
     } else value={title:'Blue square',overview:'The square is blue.',keyPoints:[{text:'The square is blue.',segmentIds:[0]}],chapters:[]};
     return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(value)}]}}]});
   }

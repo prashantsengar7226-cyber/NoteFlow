@@ -1,8 +1,9 @@
 import test,{beforeEach,afterEach} from 'node:test';
 import assert from 'node:assert/strict';
-import {env} from '../.test-runtime/harness.mjs';
+import {env,context} from '../.test-runtime/harness.mjs';
+import * as workspace from '../.test-runtime/workspace.mjs';
 import {aiContext} from '../.test-runtime/ai-context.mjs';
-import {weekWindow,reserveOperation,settleOperation,weeklyUsage,withAIFeature} from '../.test-runtime/ai-policy.mjs';
+import {weekWindow,reserveOperation,settleOperation,weeklyUsage,withAIFeature,usesVertex} from '../.test-runtime/ai-policy.mjs';
 import {config,consumeService,ai} from '../.test-runtime/server.mjs';
 import {vertexConfig,vertexGenerate} from '../.test-runtime/vertex.mjs';
 import {generateKeyPairSync} from 'node:crypto';
@@ -10,6 +11,22 @@ import {z} from 'zod';
 import {enqueueSummary,runNextJob,findJob,cancelJob} from '../.test-runtime/ai-jobs.mjs';
 import {summaryClaims,evidenceCatalog,resolveEvidence,validateReview,alignReviewedCitations} from '../.test-runtime/summary-quality.mjs';
 const originalFetch=globalThis.fetch;
+test('paid boundary rejects anonymous, regular, small-tool and personal-key callers without fetching',async()=>{
+  env.AI_FEATURE_ROUTING='true';
+  const admin='12345678-1234-1234-1234-123456789abc';env.AI_ADMIN_USER_IDS=admin;
+  let calls=0;globalThis.fetch=async()=>{calls++;throw new Error('Unexpected paid request');};
+  await assert.rejects(vertexGenerate({},1000),e=>e.code==='VERTEX_ADMIN_ONLY');
+  for(const scope of [{owner:'regular-user',feature:'summary'},
+    {owner:admin,feature:'quiz'}, {owner:admin,feature:'summary',candidate:{provider:'gemini',key:'personal',model:'test'}}]) {
+    await aiContext.run(scope,async()=>{
+      assert.equal(usesVertex(),false);
+      await assert.rejects(vertexGenerate({},1000),e=>e.code==='VERTEX_ADMIN_ONLY');
+      if(!scope.candidate)assert.deepEqual(config().candidates.map(c=>c.provider),['openrouter']);
+    });
+  }
+  assert.equal(calls,0);
+  await aiContext.run({owner:admin,feature:'insights'},async()=>assert.equal(usesVertex(),true));
+});
 beforeEach(async()=>{
   await env.DB.prepare('DELETE FROM ai_operations').run();
   await env.DB.prepare('DELETE FROM limits').run();
@@ -19,6 +36,38 @@ beforeEach(async()=>{
   env.VERTEX_ENABLED='false';env.AI_ADMIN_USER_IDS='';
 });
 afterEach(()=>{globalThis.fetch=originalFetch;});
+
+test('regular workspace and queued revision review stay free even with Vertex configured',async()=>{
+  const owner='regular-free-fixture',id=crypto.randomUUID();
+  env.AI_ADMIN_USER_IDS='12345678-1234-1234-1234-123456789abc';
+  const source=[{id:0,start:0,text:'The square is blue.'}];
+  const part={title:'Blue square',overview:'The square is blue.',keyPoints:[{text:'The square is blue.',segmentIds:[0]}],chapters:[]};
+  await env.DB.prepare('INSERT INTO notes(id,owner,title,source,transcript,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').bind(id,owner,'Test','text',JSON.stringify(source),Date.now(),Date.now()).run();
+  for(const feature of ['summary','insights','quiz','flashcards','mindmap','slides','translation','chat']) {
+    await aiContext.run({owner,feature},async()=>{
+      assert.equal(usesVertex(),false);
+      assert.equal(config().candidates[0].freeOnly,true);
+    });
+  }
+  const status=await context.run(owner,()=>workspace.GET(new Request('https://test.example/api/workspace')));
+  const data=await status.json();assert.equal(data.vertex,false);assert.equal(data.summaryConnection.provider,'Free AI');assert.equal(data.dailyLimits.ai,null);
+  let calls=0;
+  globalThis.fetch=async(url,init)=>{
+    assert.equal(url,'https://openrouter.ai/api/v1/chat/completions');calls++;
+    const request=JSON.parse(init.body);
+    assert.deepEqual(request.provider.max_price,{prompt:0,completion:0,request:0});
+    assert.equal(request.provider.sort,'throughput');assert.equal(request.reasoning.effort,'low');
+    const value=calls===1?part:{claims:summaryClaims(part).map(c=>({claimId:c.id,sourceIds:['0:0'],reason:'',verdict:'supported'})),omissions:[]};
+    return Response.json({model:'synthetic/free-model:free',choices:[{finish_reason:'stop',message:{content:JSON.stringify(value)}}]});
+  };
+  const job=await enqueueSummary(owner,{id,language:'English',detail:'detailed'});
+  await runNextJob(owner,job.id);
+  await env.DB.prepare('UPDATE ai_jobs SET next_at=0 WHERE id=?').bind(job.id).run();
+  await runNextJob(owner,job.id);
+  assert.equal((await findJob(owner,job.id)).state,'completed');assert.equal(calls,2);
+  assert.equal((await weeklyUsage(owner)).used,0);
+  assert.equal((await env.DB.prepare('SELECT COUNT(*) AS n FROM vertex_budget').first()).n,0);
+});
 
 test('Vertex evidence IDs resolve exact Unicode text and reject unknown or mismatched citations',()=>{
   const source=[{id:7,start:0,text:'सही संख्या 540 पुस्तकें है। '.repeat(30)},{id:8,start:1,text:'खरीद अभी प्रस्तावित है।'}];
@@ -44,18 +93,18 @@ test('weekly IST boundary is Monday midnight, including year rollover',()=>{
   assert.equal(new Date(weekWindow(Date.parse('2026-10-25T18:29:59Z')).resetAt).toISOString(),'2026-10-25T18:30:00.000Z');
   assert.equal(new Date(weekWindow(Date.parse('2027-01-01T00:00:00Z')).start).toISOString(),'2026-12-27T18:30:00.000Z');
 });
-test('concurrent reservations cap at 20; replay, release and other owners are isolated',async()=>{
+test('free revision guides do not reserve a weekly paid allowance',async()=>{
   const results=await Promise.allSettled(Array.from({length:30},(_,i)=>reserveOperation('alice',`run-${i}`,'summary')));
-  assert.equal(results.filter(r=>r.status==='fulfilled').length,20);
+  assert.equal(results.filter(r=>r.status==='fulfilled').length,30);
   await reserveOperation('alice','run-0','summary');
-  assert.equal((await weeklyUsage('alice')).used,20);
+  assert.equal((await weeklyUsage('alice')).used,0);
   await settleOperation('alice','run-0',false);
   await reserveOperation('alice','run-0','summary');
-  await assert.rejects(reserveOperation('alice','extra','insights'),e=>e.code==='WEEKLY_LIMIT');
+  await reserveOperation('alice','extra','insights');
   await reserveOperation('bob','run-0','insights');
   await settleOperation('bob','run-0',true);
   await settleOperation('bob','run-0',false);
-  assert.equal((await weeklyUsage('bob')).used,1);
+  assert.equal((await weeklyUsage('bob')).used,0);
 });
 test('admin allowlist bypasses weekly allowance; personal keys and small features do not reserve it',async()=>{
   const admin='12345678-1234-1234-1234-123456789abc';env.AI_ADMIN_USER_IDS=admin;
@@ -72,7 +121,7 @@ test('small feature calls have no daily user cap and cannot route to Vertex or p
   env.OPENROUTER_MODEL='paid/model';assert.equal(config().candidates.length,0);
   await aiContext.run({owner:'alice'},()=>withAIFeature('summary',async()=>{
     assert.equal(config().candidates.length,0);
-    await assert.rejects(ai('test','test',z.object({ok:z.boolean()}),[]),e=>e.code==='VERTEX_NOT_CONFIGURED');
+    await assert.rejects(ai('test','test',z.object({ok:z.boolean()}),[]),e=>e.code==='AI_NOT_CONFIGURED');
   }));
 });
 test('Vertex auth and inference use fixed hosts, global attempt cap covers admins and no fallback',async()=>{
@@ -81,8 +130,11 @@ test('Vertex auth and inference use fixed hosts, global attempt cap covers admin
   env.VERTEX_MODEL='gemini-3.5-flash';
   const urls=[];
   globalThis.fetch=async(url,init)=>{urls.push(url);assert.equal(init.redirect,'manual');if(!url.includes('oauth2'))assert.equal(JSON.parse(init.body).generationConfig.thinkingConfig.thinkingLevel,'LOW');return url.includes('oauth2')?Response.json({access_token:'fixture-token',expires_in:3600}):Response.json({candidates:[]});};
-  await vertexGenerate({},1000);
-  await assert.rejects(vertexGenerate({},1000),e=>e.code==='VERTEX_CAP');
+  const owner='12345678-1234-1234-1234-123456789abc';env.AI_ADMIN_USER_IDS=owner;
+  await aiContext.run({owner,feature:'summary'},async()=>{
+    await vertexGenerate({},1000);
+    await assert.rejects(vertexGenerate({},1000),e=>e.code==='VERTEX_CAP');
+  });
   assert.equal(urls.length,2);
   assert.equal(urls[1],'https://aiplatform.googleapis.com/v1/projects/test-project/locations/global/publishers/google/models/gemini-3.5-flash:generateContent');
   env.VERTEX_CREDIT_EXPIRES_AT='2020-01-01';assert.throws(vertexConfig,e=>e.code==='VERTEX_NOT_CONFIGURED');
@@ -95,7 +147,7 @@ test('personal gcloud credentials cannot enable Vertex on Vercel',()=>{
 test('queued Vertex generation and review count once; replay is free and cancellation refunds',async()=>{
   const {privateKey}=generateKeyPairSync('rsa',{modulusLength:2048});
   Object.assign(env,{VERTEX_ENABLED:'true',VERTEX_PROJECT_ID:'queue-project',VERTEX_LOCATION:'global',VERTEX_MODEL:'gemini-test',VERTEX_CREDIT_EXPIRES_AT:'2099-01-01',VERTEX_DAILY_REQUEST_CAP:'10',VERTEX_TOTAL_REQUEST_CAP:'10',VERTEX_SERVICE_ACCOUNT_JSON:JSON.stringify({type:'service_account',client_email:'queue@queue-project.iam.gserviceaccount.com',private_key:privateKey.export({type:'pkcs8',format:'pem'})})});
-  const owner='queue-fixture',id=crypto.randomUUID();
+  const owner='12345678-1234-1234-1234-123456789abc',id=crypto.randomUUID();env.AI_ADMIN_USER_IDS=owner;
   const source=[{id:0,text:'The square is blue.',start:0}];
   const part={title:'Blue square',overview:'The square is blue.',keyPoints:[{text:'The square is blue.',segmentIds:[0]}],chapters:[]};
   await env.DB.prepare('INSERT INTO notes(id,owner,title,source,transcript,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').bind(id,owner,'Test','text',JSON.stringify(source),Date.now(),Date.now()).run();
