@@ -1,0 +1,7 @@
+# Import response recovery — 26 October 2026
+
+Production investigation found a YouTube POST returning HTTP 201 and a ready note with an approximately 89,000-character transcript. The browser displayed the message used when the response body cannot be parsed. No corresponding runtime exception was recorded. The specific transport cause of that unreadable response remains unconfirmed; the source was saved before the error.
+
+The client now checks the existing import receipt after an interrupted, unreadable or server-error response. This read is authenticated and scoped to the current owner, and returns the saved note so the existing summary flow can continue. It does not reissue the provider request. Receipt checks are bounded to six attempts with ten-second request timeouts. A failed recovery retains the input and existing idempotency key for a safe manual retry. Authentication, validation and quota failures are not automatically retried.
+
+Verification includes truncated HTTP 201 bodies, network failures, HTML gateway errors, no duplicate POST, account isolation, private-field filtering, and invalid receipt IDs. The browser regression deliberately commits a real import to temporary local storage and then replaces its response with truncated JSON; it must recover that note and generate a basic summary. Supabase identity and external AI remain mocked in this browser test. This does not establish real-video AI completeness or identify the original network fault.

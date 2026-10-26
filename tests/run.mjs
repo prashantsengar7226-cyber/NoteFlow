@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process';
 const dest = new URL('../.test-runtime/', import.meta.url);
 await mkdir(dest, { recursive: true });
 const sources = {
+  'lib/api-client.ts':'api-client.mjs',
   'lib/ai-policy.ts':'ai-policy.mjs',
   'lib/vertex.ts':'vertex.mjs',
   'lib/queue-client.ts':'queue-client.mjs',
@@ -82,6 +83,7 @@ const result = process.argv.includes('--live-vertex') ? spawnSync(process.execPa
     'tests/staging-config.test.mjs',
     'tests/core.test.mjs',
     'tests/api.test.mjs',
+    'tests/api-client.test.mjs',
     'tests/billing.test.mjs',
     'tests/study.test.mjs',
     'tests/platform.test.mjs',

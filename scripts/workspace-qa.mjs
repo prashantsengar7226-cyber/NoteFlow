@@ -215,6 +215,31 @@ try {
     assert.equal((await api(a.page,'/api/notes')).data.notes.length,0);
   }
   results.push({check:'unsupported/oversized file replacements clear prior source and cannot import it',pass:true});
+  // Commit a real local import, then deliberately truncate only its HTTP response.
+  // The browser must recover the saved note and continue its summary with one POST.
+  await fileInput.setInputFiles(goodFile);
+  await a.page.locator('[aria-labelledby="import-title"]').getByLabel('Summary mode').selectOption('basic');
+  let importPosts=0;
+  const lostConfirmation=async route=>{
+    if(route.request().method()!=='POST')return route.continue();
+    importPosts++;
+    const saved=await route.fetch();
+    assert.equal(saved.status(),201);
+    await route.fulfill({status:201,contentType:'application/json',body:'{"note":'});
+  };
+  await a.page.route('**/api/notes',lostConfirmation);
+  await a.page.getByRole('button',{name:'Create note',exact:true}).click();
+  await a.page.getByRole('tab',{name:'Summary',exact:true}).waitFor();
+  await a.page.waitForFunction(async()=>{
+    const list=await (await fetch('/api/notes')).json();
+    if(list.notes.length!==1)return false;
+    const view=await (await fetch('/api/notes?id='+list.notes[0].id)).json();
+    return !!view.note.summary;
+  });
+  assert.equal(importPosts,1);
+  assert.equal(await a.page.getByRole('button',{name:'Create note',exact:true}).count(),0);
+  await a.page.unroute('**/api/notes',lostConfirmation);
+  results.push({check:'truncated import success recovers the saved note and generates basic summary without duplicate import',pass:true});
   await a.page.goto(base+'/');
   await a.page.locator('form[action="/auth/signout"] button').click();
   await a.page.waitForURL(base+'/login');

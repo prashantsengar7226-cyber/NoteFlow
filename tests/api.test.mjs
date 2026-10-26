@@ -795,6 +795,15 @@ test('import retries create one note and charge one unit, scoped to the signed-i
     assert.equal(second.data.note.id, first.data.note.id);
     assert.equal(calls, 1);
     assert.equal((await usage('retry-owner')).youtube, 1);
+    const receipt = '?requestId=' + input.requestId;
+    const recovered = await call(notes, 'GET', null, 'retry-owner', receipt);
+    assert.equal(recovered.status, 200);
+    assert.equal(recovered.data.note.id, first.data.note.id);
+    assert.equal('owner' in recovered.data.note, false);
+    assert.equal('provider_job' in recovered.data.note, false);
+    assert.equal((await call(notes, 'GET', null, 'retry-other', receipt)).data.note, null);
+    assert.equal((await call(notes, 'GET', null, 'retry-owner', '?requestId=invalid')).status, 400);
+    assert.equal(calls, 1);
     assert.equal(
       (await call(notes, 'POST', { ...input, title: 'Changed' }, 'retry-owner')).status,
       409,

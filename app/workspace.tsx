@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
+import { api, recoverableImport } from '@/lib/api-client';
 import { summarySourceChunks } from '@/lib/study';
 import {
   ArrowUpRight,
@@ -174,46 +175,6 @@ Time blocks help give attention a boundary. A beginner might choose a twenty-fiv
 Breaks are most useful when they allow a change of activity. Stand up, drink water, or look away from the screen. Jumping into a fast-moving social feed may make returning to the task more difficult. There is no single break schedule that works for everyone.
 At the end of a session, write down what you completed and the next small action. This makes the next session easier to begin. Review your notes weekly and look for recurring distractions. Change one part of your routine at a time so that you can see whether it helps.
 Focused work is not a replacement for collaboration. Teams also need deliberate time for questions, shared decisions, and feedback. Agreeing on response expectations can create room for both focused individual work and effective communication. This example is an original practice transcript, not a recording or a research study.`;
-async function api<T>(path: string, method = 'GET', payload?: unknown): Promise<T> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 180000);
-  try {
-    let r: Response;
-    try {
-      r = await fetch(path, {
-        method,
-        signal: controller.signal,
-        headers: payload ? { 'Content-Type': 'application/json' } : undefined,
-        body: payload ? JSON.stringify(payload) : undefined,
-      });
-    } catch {
-      throw new Error(
-        controller.signal.aborted
-          ? 'The request took too long. Check your library before retrying; your source may already be saved.'
-          : 'Connection lost. Check your internet connection and retry. Your input is still here.',
-      );
-    }
-    if (r.status === 401)
-      throw new Error('Your session expired. Sign in with your account again to continue.');
-    let data: T & { error?: string; resetAt?: number; retryAt?: number };
-    try {
-      data = await r.json();
-    } catch {
-      throw new Error(
-        'The server could not finish the request. Please retry shortly; your input is still here.',
-      );
-    }
-    if (!r.ok)
-      throw new Error(
-        (data.error || 'Request failed. Please try again.') +
-          (data.resetAt ? ` Next reset: ${new Date(data.resetAt).toLocaleString()}.` : '') +
-          (data.retryAt ? ` Retry after ${new Date(data.retryAt).toLocaleTimeString()}.` : ''),
-      );
-    return data;
-  } finally {
-    clearTimeout(timer);
-  }
-}
 function download(name: string, text: string, type = 'text/plain') {
   const url = URL.createObjectURL(new Blob([text], { type }));
   const a = document.createElement('a');
@@ -374,7 +335,7 @@ export default function Workspace({ name }: { name: string }) {
     const fingerprint = JSON.stringify(payload);
     const requestId = importRequests.current.get(fingerprint) ?? crypto.randomUUID();
     importRequests.current.set(fingerprint, requestId);
-    return api<{ note: Note }>('/api/notes', 'POST', { ...payload, requestId });
+    return recoverableImport<Note>({ ...payload, requestId });
   }
   function notice(text: string) {
     setToast(text);

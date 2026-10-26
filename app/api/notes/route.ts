@@ -26,6 +26,16 @@ export async function GET(r: Request) {
     const owner = await guard(r);
     const url = new URL(r.url),
       id = url.searchParams.get('id');
+    const requestId = url.searchParams.get('requestId');
+    if (requestId !== null) {
+      z.string().uuid().parse(requestId);
+      await limited(owner, 60);
+      const receipt = await db()
+        .prepare('SELECT note_id FROM import_requests WHERE owner=? AND request_id=?')
+        .bind(owner, requestId)
+        .first<{ note_id: string | null }>();
+      return json({ note: receipt?.note_id ? publicNote(await ownedNote(receipt.note_id, owner)) : null });
+    }
     if (id) {
       const note = await ownedNote(id, owner);
       const artifacts = await db()
