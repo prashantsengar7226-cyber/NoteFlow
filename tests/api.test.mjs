@@ -7,6 +7,8 @@ import * as transcribe from '../.test-runtime/transcribe.mjs';
 import * as pdfExport from '../.test-runtime/export.mjs';
 import { env, context } from '../.test-runtime/harness.mjs';
 import { guard, consumeService, usage } from '../.test-runtime/server.mjs';
+import { summarySourceChunks } from '../.test-runtime/study.mjs';
+import { sourceText } from '../.test-runtime/core.mjs';
 beforeEach(async()=>{await env.DB.prepare("DELETE FROM limits WHERE owner LIKE 'provider:cooldown:%'").run();});
 
 function geminiResult(value) {
@@ -14,6 +16,51 @@ function geminiResult(value) {
     candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify(value) }] } }],
   });
 }
+
+test('timed-out legacy resume splits only the unfinished suffix and survives failure/replay', async () => {
+  const owner = 'legacy-timeout-recovery';
+  const note = await create(owner);
+  const segments = [{ id: 0, start: 0, text: 'A'.repeat(16000) }, { id: 1, start: 60, text: 'अ'.repeat(22000) }];
+  await env.DB.prepare('UPDATE notes SET transcript=? WHERE id=?').bind(JSON.stringify(segments), note.id).run();
+  const saved = { title: 'Saved title', overview: 'Already saved', keyPoints: [{text:'Keep this fact',segmentIds:[0]}], chapters:[] };
+  const runId = crypto.randomUUID();
+  await env.DB.prepare('INSERT INTO artifacts(note_id,kind,content,created_at) VALUES(?,?,?,?)')
+    .bind(note.id,'__summary_progress',JSON.stringify({runId,language:'Hindi',detail:'balanced',parts:[saved],totalParts:3,chunkVersion:2,lockUntil:0,error:'The service response timed out.'}),Date.now()).run();
+  const expected = summarySourceChunks(summarySourceChunks(segments,'balanced',2).slice(1).flat(),'balanced',3);
+  const originalFetch = globalThis.fetch;
+  env.AI_PROVIDER='gemini'; env.GEMINI_API_KEY='fixture';
+  const input={id:note.id,action:'summary',language:'Hindi',detail:'balanced',incremental:true};
+  let calls=0;
+  try {
+    globalThis.fetch=async()=>{throw new DOMException('fixture timeout','TimeoutError');};
+    assert.equal((await call(actions,'POST',input,owner)).data.code,'TIMEOUT');
+    assert.equal((await usage(owner)).ai,0);
+    const row=await env.DB.prepare('SELECT content FROM artifacts WHERE note_id=? AND kind=?').bind(note.id,'__summary_progress').first();
+    const progress=JSON.parse(row.content);
+    assert.deepEqual(progress.parts,[saved]);
+    assert.deepEqual(progress.legacyPrefix,{version:2,count:1});
+    assert.equal(progress.totalParts,expected.length+1);
+    assert.equal(progress.runId,runId);
+    const replay=await call(actions,'POST',{...input,runId,completedParts:0},owner);
+    assert.equal(replay.data.completedParts,1);
+    const view=await call(notes,'GET',null,owner,'?id='+note.id);
+    assert.equal(view.data.summaryProgress.preview.coverage.processedCharacters,16000);
+    globalThis.fetch=async(_url,options)=>{
+      const content=JSON.parse(options.body).contents[0].parts[0].text.split('CURRENT PART:\n')[1];
+      assert.equal(content,sourceText(expected[calls]));
+      calls++;
+      return geminiResult({title:'Suffix',overview:'New part',keyPoints:[{text:'New fact',segmentIds:[1]}],chapters:[]});
+    };
+    let step=await call(actions,'POST',input,owner);
+    while(step.status===200 && !step.data.result) step=await call(actions,'POST',{...input,runId,completedParts:step.data.completedParts},owner);
+    assert.equal(step.status,200);
+    assert.equal(calls,expected.length);
+    assert.equal((await usage(owner)).ai,expected.length);
+    assert.deepEqual(step.data.result.keyPoints[0],saved.keyPoints[0]);
+    assert.equal(step.data.result.coverage.processedCharacters,38000);
+    assert.equal((await call(notes,'GET',null,owner,'?id='+note.id)).data.summaryProgress,null);
+  } finally { globalThis.fetch=originalFetch; delete env.AI_PROVIDER; delete env.GEMINI_API_KEY; }
+});
 
 test('writes compare Origin against the incoming Host, not the internal server URL', async () => {
   const request = (origin) =>
