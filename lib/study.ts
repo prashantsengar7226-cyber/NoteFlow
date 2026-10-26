@@ -49,7 +49,40 @@ export function summaryChunks(segments: Segment[], budget = 10000): Segment[][] 
   return chunks;
 }
 
-export function summarySourceChunks(segments: Segment[], detail: string, version = 2) {
+// A conservative sizing heuristic, not a model tokenizer. Non-ASCII scripts
+// can consume many more tokens per character than English. Leave headroom for
+// instructions, schema and boundary context rather than using characters alone.
+export function sourceTokenEstimate(text: string) {
+  let cost = 0;
+  for (const char of text) cost += char.codePointAt(0)! < 128 ? 0.25 : 1;
+  return Math.ceil(cost);
+}
+
+function multilingualChunks(segments: Segment[], characterBudget: number): Segment[][] {
+  const chunks: Segment[][] = [];
+  let chunk: Segment[] = [], characters = 0, cost = 0;
+  const flush = () => { if (chunk.length) chunks.push(chunk); chunk = []; characters = 0; cost = 0; };
+  for (const segment of segments) {
+    const segmentCost = sourceTokenEstimate(segment.text);
+    if (chunk.length && segment.text.length <= characterBudget && segmentCost <= 3500 &&
+        (characters + segment.text.length > characterBudget || cost + segmentCost > 3500)) flush();
+    let text = '';
+    for (const char of segment.text) {
+      const weight = char.codePointAt(0)! < 128 ? 0.25 : 1;
+      if (characters + char.length > characterBudget || cost + weight > 3500) {
+        if (text) chunk.push({ ...segment, text });
+        text = ''; flush();
+      }
+      text += char; characters += char.length; cost += weight;
+    }
+    if (text) chunk.push({ ...segment, text });
+  }
+  flush();
+  return chunks;
+}
+
+export function summarySourceChunks(segments: Segment[], detail: string, version = 3) {
+  if (version >= 3) return multilingualChunks(segments, detail === 'detailed' ? 8000 : 16000);
   const large = segments.reduce((n, segment) => n + segment.text.length, 0) > 60000;
   return summaryChunks(
     segments,

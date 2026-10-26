@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { summaryChunks, summarySourceChunks, mergeStudyItems, studyCoverage } from '../.test-runtime/study.mjs';
+import { summaryChunks, summarySourceChunks, sourceTokenEstimate, mergeStudyItems, studyCoverage } from '../.test-runtime/study.mjs';
 import { createStudyPdf, createSummaryCollectionPdf } from '../.test-runtime/pdf.mjs';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { readFile, writeFile } from 'node:fs/promises';
@@ -43,7 +43,7 @@ test('new detailed summaries never enlarge chunks for long sources; legacy runs 
   assert.ok(current.every(chunk=>chunk.reduce((n,s)=>n+s.text.length,0)<=8000));
   assert.equal(current.flat().map(s=>s.text).join(''),source[0].text);
   assert.equal(summarySourceChunks(source,'detailed',1).length,10);
-  assert.equal(summarySourceChunks(source,'balanced').length,19);
+  assert.equal(summarySourceChunks(source,'balanced').length,22);
 });
 test('downloaded PDF includes complete notes, cards, source, and a separate answer key', async () => {
   const fonts = {};
@@ -169,4 +169,15 @@ test('three document summaries export in order with a contents page and separate
   await assert.rejects(createSummaryCollectionPdf([{ ...documents[0], summary: null }], fonts), {
     code: 'INCOMPLETE_BATCH',
   });
+});
+
+test('multilingual chunks bound estimated tokens, preserve Unicode and retain legacy boundaries', () => {
+  const text = 'हिन्दी तथ्य 2026। '.repeat(1200) + '🧪 अंतिम अपवाद';
+  const source = [{ id: 4, start: 10, text }, { id: 5, start: 42, text: 'Closing correction.' }];
+  const chunks = summarySourceChunks(source, 'detailed');
+  assert.equal(chunks.flat().map(s => s.text).join(''), source.map(s => s.text).join(''));
+  assert.ok(chunks.every(chunk => sourceTokenEstimate(chunk.map(s => s.text).join('')) <= 3500));
+  assert.ok(chunks.flat().every(s => s.text.isWellFormed()));
+  assert.ok(chunks.length > summarySourceChunks(source, 'detailed', 2).length);
+  assert.deepEqual([...new Set(chunks.flat().map(s => s.id))], [4, 5]);
 });
