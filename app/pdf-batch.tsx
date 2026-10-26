@@ -193,6 +193,10 @@ export function PdfBatch({
                   setMessage('A long summary paused. Continue unfinished documents to resume.');
                 break;
               }
+              if (result?.fallback) {
+                update(item.key, { state: 'done', message: 'Source notes ready · AI enhancement is separate' });
+                continue;
+              }
             }
           }
           update(item.key, { state: 'done', message: 'Summary saved' });

@@ -23,7 +23,7 @@ export async function POST(request: Request) {
     for (const id of ids) {
       const row = await ownedNote(id, owner);
       const note = publicNote(row);
-      if (note.status !== 'ready' || !note.summary || (await readSummaryProgress(row)))
+      if (note.status !== 'ready' || !note.summary || (!note.summary.fallback && (await readSummaryProgress(row))))
         throw new AppError(
           409,
           'INCOMPLETE_BATCH',

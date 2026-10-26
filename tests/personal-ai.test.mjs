@@ -13,7 +13,8 @@ import * as worker from '../.test-runtime/queue-worker.mjs';
 import * as notes from '../.test-runtime/notes.mjs';
 import * as models from '../.test-runtime/ai-models-route.mjs';
 import {listModels} from '../.test-runtime/ai-models.mjs';
-import {jobMessage} from '../.test-runtime/queue-client.mjs';
+import {jobMessage,queuedSummary} from '../.test-runtime/queue-client.mjs';
+import {sourceNotes,asMarkdown} from '../.test-runtime/core.mjs';
 
 const originalFetch=globalThis.fetch;
 const source=[{id:0,text:'The square is blue.',start:0}];
@@ -44,6 +45,63 @@ async function call(route,method,value,owner='alice',query='',origin='https://te
   return {status:res.status,data:await res.json()};
 }
 async function due(id){await env.DB.prepare('UPDATE ai_jobs SET next_at=0 WHERE id=?').bind(id).run();}
+async function savedSummary(id){return JSON.parse((await env.DB.prepare('SELECT summary FROM notes WHERE id=?').bind(id).first()).summary);}
+
+test('source notes are bounded original excerpts across the transcript and exports label them honestly',()=>{
+  const source=Array.from({length:204},(_,id)=>({id,start:id*10,text:`मूल स्रोत ${id} 😀 `+'लंबा पाठ। '.repeat(200)}));
+  const notes=sourceNotes(source,'Source fixture','TIMEOUT');
+  assert.equal(notes.engine,'extractive');assert.equal(notes.keyPoints.length,12);
+  assert.equal(notes.keyPoints[0].segmentIds[0],0);assert.equal(notes.keyPoints.at(-1).segmentIds[0],203);
+  for(const point of notes.keyPoints){assert.ok(source[point.segmentIds[0]].text.startsWith(point.text.replace(/ …$/,'')));assert.ok(!point.text.includes('\uFFFD'));}
+  assert.ok(Buffer.byteLength(JSON.stringify(notes))<60000);assert.equal(notes.sourceChecks,undefined);
+  assert.match(asMarkdown('Title',notes),/Selected source excerpts/);
+  assert.match(notes.overview,/not an AI-written summary/);
+});
+
+test('provider limits produce usable source notes without spending quota and retain the recovery schedule',async()=>{
+  const id=await note();const job=await enqueueSummary('alice',{id,language:'Hindi',detail:'balanced'});
+  let calls=0;globalThis.fetch=async()=>{calls++;return new Response('',{status:429,headers:{'retry-after':'300'}});};
+  await runNextJob('alice',job.id);
+  const result=await savedSummary(id),state=await findJob('alice',job.id);
+  assert.equal(result.engine,'extractive');assert.equal(result.language,'Source language');assert.equal(result.fallback.reason,'PROVIDER_LIMIT');
+  assert.equal(state.state,'retry');assert.ok(state.next_at>Date.now()+290000);assert.equal(calls,1);assert.equal((await usage('alice')).ai,0);
+  assert.equal((await call(notes,'GET',undefined,'bob','?id='+id)).status,404);
+  await runNextJob('alice',job.id);assert.equal(calls,1);
+});
+
+test('source notes work at the shared daily cap with no AI request and never overwrite an existing AI result',async()=>{
+  const id=await note();for(let i=0;i<20;i++)await consumeService('alice','ai');
+  const job=await enqueueSummary('alice',{id,language:'English',detail:'balanced'});
+  globalThis.fetch=async()=>{throw new Error('No provider request allowed');};
+  await runNextJob('alice',job.id);assert.equal((await savedSummary(id)).fallback.reason,'DAILY_LIMIT');assert.equal((await usage('alice')).ai,20);
+  const ai={...part,engine:'ai',language:'English'};
+  await env.DB.prepare('UPDATE notes SET summary=? WHERE id=?').bind(JSON.stringify(ai),id).run();
+  await due(job.id);await runNextJob('alice',job.id);assert.deepEqual(await savedSummary(id),ai);
+});
+
+test('cancellation during an AI call prevents the fallback from overwriting the note',async()=>{
+  const id=await note();const job=await enqueueSummary('alice',{id,language:'English',detail:'balanced'});
+  globalThis.fetch=async()=>{await call(jobs,'DELETE',{jobId:job.id});return new Response('',{status:429});};
+  await runNextJob('alice',job.id);assert.equal((await findJob('alice',job.id)).state,'cancelled');assert.equal((await savedSummary(id)).fallback.reason,'AI_PENDING');
+});
+
+test('client returns labelled source notes during cooldown without kicking or marking AI complete',async()=>{
+  const summary=sourceNotes(source,'Test','PROVIDER_LIMIT');let calls=0;
+  const job={id:crypto.randomUUID(),noteId:'note',state:'retry',errorCode:'PROVIDER_LIMIT',nextAt:Date.now()+300000};
+  globalThis.fetch=async(path)=>{calls++;return Response.json(path==='/api/ai-jobs'?{job}:{note:{summary}});};
+  assert.deepEqual(await queuedSummary('note',{language:'Hindi',detail:'balanced'},()=>{}),summary);assert.equal(calls,2);
+});
+
+test('source notes are available while the first provider request is still pending',async()=>{
+  const id=await note();const job=await enqueueSummary('alice',{id,language:'English',detail:'balanced'});
+  let release,started;const began=new Promise(resolve=>started=resolve);
+  globalThis.fetch=async()=>{started();return new Promise(resolve=>release=()=>resolve(response(part)));};
+  const running=runNextJob('alice',job.id);
+  await began;
+  try{assert.equal((await savedSummary(id)).fallback.reason,'AI_PENDING');assert.equal((await findJob('alice',job.id)).state,'running');}
+  finally{release();await running;}
+  assert.equal((await findJob('alice',job.id)).completed_parts,0);
+});
 
 test('encrypted credentials are authenticated to owner, provider, model and revision',async()=>{
   const row=await key();assert.equal(openKey(row),'personal-fixture-credential');
@@ -183,7 +241,7 @@ test('queue saves a private draft, verifies on a separate invocation, then publi
   const id=await note();const job=await enqueueSummary('alice',{id,language:'English',detail:'balanced'});
   let calls=0;globalThis.fetch=async()=>{calls++;return response(calls===1?part:goodReview());};
   await runNextJob('alice',job.id);
-  assert.equal((await env.DB.prepare('SELECT summary FROM notes WHERE id=?').bind(id).first()).summary,null);
+  assert.equal((await savedSummary(id)).engine,'extractive');
   assert.equal((await findJob('alice',job.id)).completed_parts,0);
   await due(job.id);await Promise.all([runNextJob('alice',job.id),runNextJob('alice',job.id)]);
   assert.equal(calls,2);assert.equal((await findJob('alice',job.id)).state,'completed');
@@ -243,7 +301,7 @@ test('invalid reviewer quotes retain the private draft and retry without another
   assert.equal((await findJob('alice',job.id)).error_code,'QUALITY_EVIDENCE');
   const pending=JSON.parse((await env.DB.prepare("SELECT content FROM artifacts WHERE note_id=? AND kind='__summary_progress'").bind(id).first()).content);
   assert.deepEqual(pending.draft,{...part,model:'gemini:gemini-3.6-flash'});
-  assert.equal((await env.DB.prepare('SELECT summary FROM notes WHERE id=?').bind(id).first()).summary,null);
+  assert.equal((await savedSummary(id)).engine,'extractive');
   assert.equal((await usage('alice')).ai,1);
   await due(job.id);await runNextJob('alice',job.id);
   assert.equal((await findJob('alice',job.id)).state,'completed');assert.equal(calls,3);assert.equal((await usage('alice')).ai,1);
@@ -259,7 +317,7 @@ test('review retries receive missing-claim feedback without publishing or regene
   await runNextJob('alice',job.id);await due(job.id);await runNextJob('alice',job.id);
   const pending=JSON.parse((await env.DB.prepare("SELECT content FROM artifacts WHERE note_id=? AND kind='__summary_progress'").bind(id).first()).content);
   assert.ok(pending.draft);assert.match(pending.evidenceIssues[0],/title, overview/);
-  assert.equal((await env.DB.prepare('SELECT summary FROM notes WHERE id=?').bind(id).first()).summary,null);
+  assert.equal((await savedSummary(id)).engine,'extractive');
   const publicNote=await call(notes,'GET',undefined,'alice','?id='+id);
   assert.ok(!JSON.stringify(publicNote.data).includes('evidenceIssues'));
   await due(job.id);await runNextJob('alice',job.id);
@@ -321,14 +379,14 @@ test('repeated evidence failures stop safely while retaining a single unpublishe
   const saved=await findJob('alice',job.id);
   assert.equal(saved.state,'failed');assert.equal(saved.failures,3);assert.equal(saved.error_code,'QUALITY_EVIDENCE');
   assert.equal(calls,4);assert.equal((await usage('alice')).ai,1);
-  assert.equal((await env.DB.prepare('SELECT summary FROM notes WHERE id=?').bind(id).first()).summary,null);
+  assert.equal((await savedSummary(id)).engine,'extractive');
 });
 test('repeated quality rejection stops after three checks without publishing unsupported claims',async()=>{
   const id=await note();const job=await enqueueSummary('alice',{id,language:'English',detail:'balanced'});
   let calls=0;globalThis.fetch=async()=>response(++calls%2?part:{...goodReview(),supported:false,issues:['Unsupported claim']});
   for(let i=0;i<6;i++){await due(job.id);await runNextJob('alice',job.id);}
   const saved=await findJob('alice',job.id);assert.equal(saved.state,'failed');assert.equal(saved.failures,3);assert.equal(calls,6);
-  assert.equal((await env.DB.prepare('SELECT summary FROM notes WHERE id=?').bind(id).first()).summary,null);
+  assert.equal((await savedSummary(id)).engine,'extractive');
 });
 test('revoked or rotated credentials never fall back to shared keys for queued jobs',async()=>{
   await key();const id=await note();const job=await enqueueSummary('alice',{id,language:'English',detail:'balanced'});

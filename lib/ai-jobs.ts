@@ -1,7 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import { env } from './platform';
-import { AppError, type Segment } from './core';
+import { AppError, sourceNotes, type Segment, type Summary } from './core';
 import { db, ownedNote } from './server';
 import { nextReset } from './plans';
 import { credential, withOwnerAI, withAILease } from './personal-ai';
@@ -66,6 +66,27 @@ export async function cancelJob(owner: string, id: string) {
   await db().prepare(`UPDATE ai_jobs SET state='cancelled',updated_at=? WHERE id=? AND owner=? AND state IN ${active}`).bind(Date.now(), id, owner).run();
 }
 
+const fallbackErrors = new Set(['AI_PENDING','DAILY_LIMIT','PROVIDER_LIMIT','PROVIDER_COOLDOWN','AI_NOT_CONFIGURED','KEY_UNAVAILABLE','KEY_STORAGE_UNAVAILABLE',
+  'TIMEOUT','PROVIDER_BUSY','PROVIDER_NETWORK','PROVIDER_UNAVAILABLE','PROVIDER_ERROR',
+  'PROVIDER_AUTH','PROVIDER_REQUEST','MODEL_UNAVAILABLE','PROVIDER_INPUT_LIMIT','PROVIDER_RESPONSE','PROVIDER_RESPONSE_LIMIT',
+  'INVALID_AI_OUTPUT','INVALID_CITATION','OUTPUT_LIMIT','AI_BLOCKED','QUALITY_REVIEW','QUALITY_EVIDENCE']);
+async function saveSourceNotes(job: AIJob, token: string, code: string) {
+  if (!fallbackErrors.has(code)) return;
+  const note = await ownedNote(job.note_id, job.owner);
+  const existing = note.summary ? JSON.parse(note.summary) as Summary : null;
+  // Never replace a completed AI result or alter its checked parts/draft.
+  if (existing?.engine === 'ai' || note.status !== 'ready') return;
+  if (code === 'AI_PENDING' && existing) return;
+  const summary = existing
+    ? { ...existing, fallback: { reason: code } }
+    : sourceNotes(JSON.parse(note.transcript) as Segment[], note.title, code);
+  // A cancellation, replacement summary, deletion or source edit wins the race.
+  await db().prepare(`UPDATE notes SET summary=?,updated_at=? WHERE id=? AND owner=? AND status='ready'
+    AND summary IS ? AND transcript=? AND EXISTS
+    (SELECT 1 FROM ai_jobs WHERE id=? AND owner=? AND state='running' AND lease_token=?)`)
+    .bind(JSON.stringify(summary), Date.now(), note.id, job.owner, note.summary, note.transcript, job.id, job.owner, token).run();
+}
+
 /** One durable generation OR source-review step per invocation. */
 export async function runNextJob(owner?: string, id?: string) {
   const now = Date.now();
@@ -88,6 +109,9 @@ export async function runNextJob(owner?: string, id?: string) {
     const result = await withOwnerAI(job.owner, () => withAILease(job.owner, async () => {
       const live = await db().prepare("SELECT id FROM ai_jobs WHERE id=? AND state='running' AND lease_token=?").bind(job.id,token).first();
       if (!live) throw new AppError(409,'JOB_CANCELLED','Task cancelled.');
+      // Make the source usable before waiting on a remote provider. This local
+      // result never marks the AI job complete and costs no generation quota.
+      await saveSourceNotes(job, token, 'AI_PENDING');
       const note = await ownedNote(job.note_id, job.owner);
       return summaryStep(note, job.owner, JSON.parse(note.transcript) as Segment[], {
         language: job.language, detail: job.detail, runId: job.run_id ?? undefined,
@@ -97,6 +121,7 @@ export async function runNextJob(owner?: string, id?: string) {
     await update('result' in result ? 'completed' : 'queued', null, Date.now() + 15000, result.completedParts > job.completed_parts ? 0 : job.failures, result.runId, result.completedParts, result.totalParts);
   } catch (error) {
     const code = error instanceof AppError ? error.code : 'INTERNAL';
+    await saveSourceNotes(job, token, code).catch(() => console.error(JSON.stringify({event:'source_notes_save_failed'})));
     const waiting = ['DAILY_LIMIT','PROVIDER_LIMIT','PROVIDER_COOLDOWN','AI_BUSY','SUMMARY_IN_PROGRESS'].includes(code);
     const retryable = waiting || ['TIMEOUT','PROVIDER_BUSY','PROVIDER_NETWORK','PROVIDER_UNAVAILABLE','UPSTREAM_ERROR','PROVIDER_ERROR','NETWORK_ERROR','INVALID_AI_OUTPUT','INVALID_CITATION','OUTPUT_LIMIT','QUALITY_REVIEW','QUALITY_EVIDENCE','INTERNAL'].includes(code);
     const failures = job.failures + (waiting ? 0 : 1);

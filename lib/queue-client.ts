@@ -32,7 +32,13 @@ export async function queuedSummary(id:string, preferences:{language:string;deta
       const data=await queueRequest<{note:{summary:Summary}}>(`/api/notes?id=${encodeURIComponent(id)}`);
       return data.note.summary;
     }
-    if (job.state==='failed') throw new Error(jobMessage(job));
+    if (job.state!=='cancelled') {
+      const data=await queueRequest<{note:{summary:Summary|null}}>(`/api/notes?id=${encodeURIComponent(id)}`);
+      // Return a usable, explicitly labelled result while background AI recovery
+      // retains its own state and cooldown. Never present an unchecked draft.
+      if (data.note.summary?.fallback) return data.note.summary;
+      if (job.state==='failed') throw new Error(jobMessage(job));
+    }
     if (job.state==='cancelled') throw new Error('Task cancelled. Saved summary parts remain available.');
     if (job.state!=='running' && job.nextAt<=Date.now()) await queueRequest('/api/ai-jobs','POST',{jobId:job.id});
     await new Promise(resolve=>setTimeout(resolve,10000));

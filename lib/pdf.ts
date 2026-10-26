@@ -193,9 +193,10 @@ async function createPdf(
         const include = (section: PdfScope) => scope === 'all' || scope === section;
         if (include('summary')) {
           if (note.summary) {
+            if (note.summary.engine === 'extractive') paragraph('Source excerpts · not an AI-written summary. Read the full transcript for all details.', 10);
             heading('Overview');
             paragraph(note.summary.overview);
-            heading('Key points');
+            heading(note.summary.fallback ? 'Selected source excerpts' : 'Key points');
             note.summary.keyPoints.forEach((point, index) => {
               room();
               paragraph(`${index + 1}. ${point.text}`);

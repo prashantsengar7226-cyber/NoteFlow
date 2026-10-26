@@ -7,6 +7,7 @@ export type Summary = {
   engine: 'ai' | 'extractive';
   models?: string[];
   sourceChecks?: { checkedParts: number; totalParts: number };
+  fallback?: { reason: string };
   language: string;
   coverage?: { reviewedSegments: number; totalSegments: number; parts: number; citedSegments?: number; processedCharacters?: number; totalCharacters?: number };
 };
@@ -221,6 +222,28 @@ export function extractiveSummary(segments: Segment[], title: string): Summary {
     language: 'Source language',
   };
 }
+/** Bounded, deterministic excerpts across the source; never labelled as AI output. */
+export function sourceNotes(segments: Segment[], title: string, reason: string): Summary {
+  const count = Math.min(12, segments.length);
+  const selected = Array.from({ length: count }, (_, i) =>
+    segments[count === 1 ? 0 : Math.round(i * (segments.length - 1) / (count - 1))]);
+  return {
+    title, engine: 'extractive', language: 'Source language', fallback: { reason },
+    overview: 'Selected excerpts from the beginning, middle and end of your transcript. These are source notes, not an AI-written summary. Open the full transcript for every detail.',
+    keyPoints: selected.map(s => {
+      const chars = Array.from(s.text);
+      return { text: chars.slice(0, 1200).join('') + (chars.length > 1200 ? ' …' : ''), segmentIds: [s.id] };
+    }),
+    chapters: [],
+  };
+}
+export function sourceNotesReason(code: string): string {
+  if (code === 'AI_PENDING') return 'AI enhancement is being prepared.';
+  if (['PROVIDER_LIMIT', 'PROVIDER_COOLDOWN', 'DAILY_LIMIT'].includes(code)) return 'The AI usage limit was reached.';
+  if (['QUALITY_REVIEW', 'QUALITY_EVIDENCE', 'INVALID_CITATION'].includes(code)) return 'The AI draft has not passed source checks.';
+  if (code === 'TIMEOUT') return 'The AI provider took too long to respond.';
+  return 'AI enhancement is currently unavailable.';
+}
 export function retrieve(segments: Segment[], question: string): Segment[] {
   const query = new Set(words(question));
   const ranked = segments
@@ -240,7 +263,7 @@ export function sourceText(segments: Segment[]) {
     .join('\n');
 }
 export function asMarkdown(title: string, summary: Summary | null, annotations = ''): string {
-  return `# ${title}\n\n${summary ? `${summary.overview}\n\n## Key takeaways\n\n${summary.keyPoints.map((p) => '- ' + p.text).join('\n')}\n\n${summary.chapters.map((c) => `### ${c.title}\n\n${c.summary}`).join('\n\n')}\n\n_Generated with ${summary.engine === 'ai' ? 'AI; verify important claims against the source.' : 'basic extractive mode; selected sentences from the source.'}_` : 'No summary generated.'}${annotations ? '\n\n## My notes\n\n' + annotations : ''}\n`;
+  return `# ${title}\n\n${summary ? `${summary.overview}\n\n## ${summary.fallback ? 'Selected source excerpts' : 'Key takeaways'}\n\n${summary.keyPoints.map((p) => '- ' + p.text).join('\n')}\n\n${summary.chapters.map((c) => `### ${c.title}\n\n${c.summary}`).join('\n\n')}\n\n_Generated with ${summary.engine === 'ai' ? 'AI; verify important claims against the source.' : 'basic extractive mode; selected sentences from the source.'}_` : 'No summary generated.'}${annotations ? '\n\n## My notes\n\n' + annotations : ''}\n`;
 }
 export function asSrt(segments: Segment[]): string {
   const format = (s: number) => {

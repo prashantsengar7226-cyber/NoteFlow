@@ -105,6 +105,27 @@ try {
   await api(a.page,'/api/notes','DELETE',{id:queueNote.data.note.id});
   await api(a.page,'/api/ai-connection','DELETE');
   results.push({check:'durable queue completes draft and source review through authenticated external ticks with browser away; other account denied',pass:true});
+  // No shared provider keys exist in this isolated process. The real worker
+  // must produce labelled source notes without bypassing provider/auth checks.
+  const fallbackNote=await api(a.page,'/api/notes','POST',{kind:'text',title:'Source fallback fixture',text:'The square is blue. '.repeat(20)});
+  const fallbackId=fallbackNote.data.note.id;
+  await api(a.page,'/api/ai-jobs','POST',{id:fallbackId,language:'Hindi',detail:'balanced'});
+  await a.page.goto(base+'/');
+  await a.page.getByRole('heading',{name:'Source fallback fixture',exact:true}).click();
+  await a.page.getByRole('heading',{name:'Source notes are ready',exact:true}).waitFor();
+  await a.page.getByText('Source notes · no AI',{exact:true}).waitFor();
+  assert.equal((await api(b.page,'/api/notes?id='+fallbackId)).status,404);
+  assert.equal((await api(a.page,'/api/export-batch','POST',{ids:[fallbackId]})).status,200);
+  for(const width of [1440,390]){
+    await a.page.setViewportSize({width,height:1000});
+    await a.page.getByLabel('Source notes ready').scrollIntoViewIfNeeded();
+    await a.page.screenshot({path:`audit/source-fallback-${width}.png`});
+    assert.equal(await a.page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  }
+  await a.page.getByRole('button',{name:'Read full transcript',exact:true}).click();
+  await a.page.getByRole('heading',{name:'Source transcript',exact:true}).waitFor();
+  await api(a.page,'/api/notes','DELETE',{id:fallbackId});
+  results.push({check:'unavailable AI produces labelled source notes, private batch export and full-transcript access on desktop/mobile',pass:true});
   await a.page.setViewportSize({width:1440,height:1000});
   const created=await api(a.page,'/api/notes','POST',{kind:'text',title:malicious,text:'Learning is more effective when practice is spaced over time. Recall improves retention. '.repeat(20)});
   assert.equal(created.status,201);const id=created.data.note.id;

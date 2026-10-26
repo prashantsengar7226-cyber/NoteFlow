@@ -55,6 +55,7 @@ import {
   asMarkdown,
   asSrt,
   timestamp,
+  sourceNotesReason,
   type Segment,
   type Summary,
   type SummaryProgress,
@@ -286,8 +287,9 @@ export default function Workspace({ name }: { name: string }) {
   const [queuedNoteIds,setQueuedNoteIds] = useState<string[]>([]);
   const summaryInQueue = !!note && queuedNoteIds.includes(note.id);
   const [summaryProgress, setSummaryProgress] = useState<SummaryProgress | null>(null);
-  const visibleSummary = summaryProgress?.preview ?? note?.summary;
-  const partialSummary = !!summaryProgress?.preview;
+  const sourceFallback = !!note?.summary?.fallback;
+  const visibleSummary = sourceFallback ? note?.summary : summaryProgress?.preview ?? note?.summary;
+  const partialSummary = !sourceFallback && !!summaryProgress?.preview;
   const [importOpen, setImportOpen] = useState(false),
     [importKind, setImportKind] = useState('youtube'),
     [source, setSource] = useState(''),
@@ -632,9 +634,9 @@ export default function Workspace({ name }: { name: string }) {
             });
       if (currentId.current !== id) return;
       if (action === 'summary' || action === 'basic') {
-        setSummaryProgress(null);
+        if (!(data.result as Summary).fallback) setSummaryProgress(null);
         setNote((n) => (n ? { ...n, summary: data.result as Summary } : n));
-        notice('Summary saved');
+        notice((data.result as Summary).fallback ? 'Source notes ready · AI enhancement is separate' : 'Summary saved');
       } else if (action === 'chat') {
         setMessages((m) => [
           ...m,
@@ -1548,18 +1550,27 @@ export default function Workspace({ name }: { name: string }) {
                             compact={!!visibleSummary}
                           />
                         )}
+                        {sourceFallback && (
+                          <section className="summary-progress" aria-label="Source notes ready">
+                            <div role="status">
+                              <h2>Source notes are ready</h2>
+                              <p>{sourceNotesReason(note.summary!.fallback!.reason)} These excerpts use the original transcript and require no AI quota. They keep the source language. AI enhancement can continue separately.</p>
+                            </div>
+                            <button className="secondary" onClick={() => setTab('transcript')}><FileText size={15} /> Read full transcript</button>
+                          </section>
+                        )}
                         {summaryProgress && (
                           <section className="summary-progress" aria-label="Summary progress">
                             <div role="status" aria-live="polite">
                               <h2>
-                                {summaryInQueue ? 'Your summary is queued for automatic recovery' : summaryPending || summaryProgress.state === 'running'
+                                {sourceFallback ? summaryInQueue ? 'AI enhancement is queued' : 'AI enhancement is paused' : summaryInQueue ? 'Your summary is queued for automatic recovery' : summaryPending || summaryProgress.state === 'running'
                                   ? 'Your summary is in progress'
                                   : 'Your summary is paused'}
                               </h2>
                               <p>
                                 {summaryProgress.completedParts} of {summaryProgress.totalParts}{' '}
                                 parts saved.
-                                {partialSummary
+                                {sourceFallback ? ' Checked AI parts are saved. Your source notes are shown below.' : partialSummary
                                   ? ' The partial summary is shown below. Remaining sections have not been summarized yet.'
                                   : ' Your source is saved. Continue to create the summary.'}
                               </p>
@@ -1575,7 +1586,7 @@ export default function Workspace({ name }: { name: string }) {
                             )}
                           </section>
                         )}
-                        {!summaryPending && !summaryInQueue && (summaryProgress?.error || error) && (
+                        {!summaryPending && !summaryInQueue && (error || (!sourceFallback && summaryProgress?.error)) && (
                           <div className="summary-error" role="alert">
                             <AlertCircle size={18} />
                             <p>{error || summaryProgress?.error}</p>
@@ -1591,7 +1602,7 @@ export default function Workspace({ name }: { name: string }) {
                                     ? partialSummary
                                       ? 'Partial AI summary'
                                       : 'AI summary'
-                                    : 'Basic · source excerpts'}
+                                    : sourceFallback ? 'Source notes · no AI' : 'Basic · source excerpts'}
                                 </span>
                                 <button
                                   className="icon-button"
@@ -1607,7 +1618,7 @@ export default function Workspace({ name }: { name: string }) {
                               <p>{visibleSummary.overview}</p>
                             </div>
                             {note.summary?.sourceChecks && <p className="source-check-note">Source review: {note.summary.sourceChecks.checkedParts} of {note.summary.sourceChecks.totalParts} parts checked. Checks compare notes with the transcript; they do not independently verify facts or analyze video visuals.</p>}
-                              <h2>Key takeaways</h2>
+                              <h2>{sourceFallback ? 'Selected source excerpts' : 'Key takeaways'}</h2>
                             <ol className="takeaways">
                               {visibleSummary.keyPoints.map((p, i) => (
                                 <li key={i}>
@@ -1723,7 +1734,7 @@ export default function Workspace({ name }: { name: string }) {
                                     summaryProgress.detail === detail
                                   ? 'Resume summary'
                                   : visibleSummary
-                                    ? 'Regenerate with AI'
+                                    ? sourceFallback ? 'Enhance with AI' : 'Regenerate with AI'
                                     : 'Generate with AI'}
                             </button>
                           </div>
