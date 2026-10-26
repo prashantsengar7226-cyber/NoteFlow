@@ -50,12 +50,22 @@ try {
   const [a,b]=sessions;
   await a.page.locator('.settings-nav').click();
   await a.page.getByRole('heading',{name:'Choose your AI connection'}).waitFor();
-  await a.page.getByLabel('Model ID',{exact:true}).fill('test-model');
   await a.page.getByLabel('API key',{exact:true}).fill('synthetic-browser-key-for-local-qa');
+  const catalogResponse=a.page.waitForResponse(r=>r.url().endsWith('/api/ai-models'));
+  await a.page.getByRole('button',{name:'Load available models',exact:true}).click();
+  const catalog=await catalogResponse;
+  assert.equal(catalog.status(),200,await catalog.text());
+  assert.equal((await catalog.json()).models.length,2);
+  await a.page.getByLabel('Model',{exact:true}).selectOption('test-model');
   await a.page.getByLabel('I authorize a connection test',{exact:false}).check();
   await a.page.getByRole('button',{name:'Test and connect',exact:true}).click();
   await a.page.getByText('Connection tested and saved. Your personal AI is active.').waitFor();
-  assert.equal(await a.page.getByLabel('API key',{exact:true}).inputValue(),'');
+  assert.equal(await a.page.getByLabel('API key',{exact:true}).count(),0);
+  await a.page.getByRole('button',{name:'Refresh models',exact:true}).click();
+  await a.page.getByLabel('Model',{exact:true}).selectOption('test-model-2');
+  await a.page.getByLabel('I authorize a connection test',{exact:false}).check();
+  await a.page.getByRole('button',{name:'Test and save model',exact:true}).click();
+  await a.page.getByText('Personal AI · gemini · test-model-2',{exact:true}).waitFor();
   for(const width of [1440,390]){
     await a.page.setViewportSize({width,height:1000});
     await a.page.locator('.personal-ai-settings').screenshot({path:`audit/personal-ai-settings-${width}.png`});

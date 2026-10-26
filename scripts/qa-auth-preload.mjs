@@ -7,6 +7,7 @@ globalThis.fetch=async(input,init={})=>{
   const url=new URL(typeof input==='string'?input:input.url??String(input));
   if(process.env.NOTEFLOW_QA_AI_TEST==='synthetic-only' && url.hostname==='generativelanguage.googleapis.com') {
     // Explicit local-only fixture mode. Never forwards requests to a real AI provider.
+    if(url.pathname==='/v1beta/models')return Response.json({models:[{name:'models/test-model',displayName:'Test model',supportedGenerationMethods:['generateContent'],inputTokenLimit:32000},{name:'models/test-model-2',displayName:'Second model with a longer name for responsive layout verification',supportedGenerationMethods:['generateContent'],inputTokenLimit:64000}]});
     const payload=JSON.parse(init.body);
     const instruction=payload.systemInstruction?.parts?.[0]?.text || '';
     let value;

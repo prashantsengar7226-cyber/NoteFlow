@@ -11,6 +11,8 @@ import * as connection from '../.test-runtime/ai-connection.mjs';
 import * as jobs from '../.test-runtime/ai-jobs-route.mjs';
 import * as worker from '../.test-runtime/queue-worker.mjs';
 import * as notes from '../.test-runtime/notes.mjs';
+import * as models from '../.test-runtime/ai-models-route.mjs';
+import {listModels} from '../.test-runtime/ai-models.mjs';
 
 const originalFetch=globalThis.fetch;
 const source=[{id:0,text:'The square is blue.',start:0}];
@@ -46,6 +48,75 @@ test('encrypted credentials are authenticated to owner, provider, model and revi
   const row=await key();assert.equal(openKey(row),'personal-fixture-credential');
   assert.ok(!row.ciphertext.includes('personal-fixture'));
   for(const change of [{owner:'bob'},{provider:'groq'},{model:'other'},{revision:'other'},{ciphertext:row.ciphertext.slice(1)}]) assert.throws(()=>openKey({...row,...change}),{code:'KEY_UNAVAILABLE'});
+});
+
+test('catalogs use fixed authenticated hosts, paginate Gemini, and filter non-text models',async()=>{
+  const secret='catalog-fixture-private-key';let pages=0;
+  globalThis.fetch=async(url,init)=>{
+    assert.equal(url.origin,'https://generativelanguage.googleapis.com');assert.equal(init.headers['x-goog-api-key'],secret);
+    assert.equal(init.redirect,'error');assert.equal(init.cache,'no-store');assert.ok(!url.href.includes(secret));
+    pages++;
+    return Response.json(pages===1?{models:[{name:'models/first',displayName:'First',supportedGenerationMethods:['generateContent'],inputTokenLimit:32000},{name:'models/embed',supportedGenerationMethods:['embedContent']}],nextPageToken:'next'}:{models:[{name:'models/second',supportedGenerationMethods:['generateContent']},{name:'models/first',supportedGenerationMethods:['generateContent']}]});
+  };
+  assert.deepEqual((await listModels('gemini',secret)).map(m=>m.id).sort(),['first','second']);assert.equal(pages,2);
+  globalThis.fetch=async(url,init)=>{assert.equal(url.href,'https://api.groq.com/openai/v1/models');assert.equal(init.headers.Authorization,'Bearer '+secret);return Response.json({data:[{id:'chat',active:true,context_window:8192},{id:'inactive',active:false},{id:'whisper-large-v3',active:true}]});};
+  assert.equal((await listModels('groq',secret)).length,1);
+  globalThis.fetch=async(url)=>{assert.equal(url.href,'https://openrouter.ai/api/v1/models/user');return Response.json({data:[{id:'vendor/free',name:'Free',architecture:{input_modalities:['text'],output_modalities:['text']},pricing:{prompt:'0',completion:'0'}},{id:'image',architecture:{input_modalities:['text'],output_modalities:['image']}}]});};
+  assert.equal((await listModels('openrouter',secret))[0].free,true);
+});
+
+test('catalog endpoint is owner-bound, same-origin, rate-limited and never persists or returns keys',async()=>{
+  const row=await key(),secret=openKey(row);let requests=0;
+  globalThis.fetch=async(_url,init)=>{requests++;assert.equal(init.headers['x-goog-api-key'],secret);return Response.json({models:[{name:'models/test-model',displayName:secret,supportedGenerationMethods:['generateContent']}]});};
+  const payload={provider:'gemini',revision:row.revision};
+  assert.equal((await call(models,'POST',payload,null)).status,401);
+  assert.equal((await call(models,'POST',payload,'alice','','https://evil.example')).status,403);
+  assert.equal((await call(models,'POST',payload,'bob')).status,409);
+  assert.equal((await call(models,'POST',{...payload,owner:'alice'},'bob')).status,400);
+  assert.equal((await call(models,'POST',{provider:'groq',revision:row.revision})).status,409);
+  const listed=await call(models,'POST',payload);assert.equal(listed.status,200);assert.ok(!JSON.stringify(listed).includes(secret));
+  assert.equal(requests,1);
+  for(let i=0;i<4;i++)await call(models,'POST',payload);
+  assert.equal((await call(models,'POST',payload)).status,429);
+  assert.equal(openKey(await env.DB.prepare('SELECT * FROM ai_credentials WHERE owner=?').bind('alice').first()),secret);
+});
+
+test('catalog failures are sanitized and never fall back to a public or shared-key list',async()=>{
+  for(const [upstream,status] of [[401,422],[403,422],[429,429],[500,503]]){
+    let calls=0;globalThis.fetch=async()=>{calls++;return new Response('private-upstream-secret',{status:upstream});};
+    await assert.rejects(listModels('openrouter','catalog-fixture-private-key'),e=>e.status===status&&!e.message.includes('private-upstream'));assert.equal(calls,1);
+  }
+  globalThis.fetch=async()=>Response.json({unexpected:'private-upstream-secret'});
+  await assert.rejects(listModels('gemini','catalog-fixture-private-key'),{code:'MODEL_CATALOG_UNAVAILABLE'});
+});
+
+test('saved-key model changes test first, rebind ciphertext and cancel only the owner’s old jobs',async()=>{
+  const row=await key();const id=await note();const job=await enqueueSummary('alice',{id,language:'English',detail:'balanced'});
+  const otherId=await note('bob');const other=await enqueueSummary('bob',{id:otherId,language:'English',detail:'balanced'});
+  let calls=0;globalThis.fetch=async(url)=>{calls++;assert.ok(String(url).includes('new-model'));return response({ok:true});};
+  assert.equal((await call(connection,'POST',{provider:'gemini',model:'new-model',revision:row.revision,consent:true},'bob')).status,409);assert.equal(calls,0);
+  const updated=await call(connection,'POST',{provider:'gemini',model:'new-model',revision:row.revision,consent:true});assert.equal(updated.status,200);
+  const saved=await env.DB.prepare('SELECT * FROM ai_credentials WHERE owner=?').bind('alice').first();
+  assert.equal(saved.model,'new-model');assert.equal(openKey(saved),'personal-fixture-credential');assert.notEqual(saved.ciphertext,row.ciphertext);assert.notEqual(saved.revision,row.revision);
+  assert.equal((await findJob('alice',job.id)).state,'cancelled');assert.equal((await findJob('bob',other.id)).state,'queued');
+  assert.equal((await call(connection,'POST',{provider:'gemini',model:'new-model',revision:row.revision,consent:true})).status,409);assert.equal(calls,1);
+});
+
+test('saving the unchanged model keeps its revision and queued work without spending a test call',async()=>{
+  const row=await key(),id=await note();const job=await enqueueSummary('alice',{id,language:'English',detail:'balanced'});
+  globalThis.fetch=async()=>{throw new Error('No provider call expected');};
+  const result=await call(connection,'POST',{provider:'gemini',model:row.model,revision:row.revision,consent:true});
+  assert.equal(result.status,200);assert.equal(result.data.revision,row.revision);assert.equal((await findJob('alice',job.id)).state,'queued');
+});
+
+test('failed model tests preserve connection; concurrent removal cannot be undone by saved-key changes',async()=>{
+  const row=await key();const payload={provider:'gemini',model:'new-model',revision:row.revision,consent:true};
+  globalThis.fetch=async()=>new Response('',{status:401});
+  assert.equal((await call(connection,'POST',payload)).status,503);
+  assert.equal((await credentialRow()).revision,row.revision);
+  globalThis.fetch=async()=>{await env.DB.prepare('DELETE FROM ai_credentials WHERE owner=?').bind('alice').run();return response({ok:true});};
+  assert.equal((await call(connection,'POST',payload)).status,409);assert.equal(await credentialRow(),null);
+  async function credentialRow(){return env.DB.prepare('SELECT * FROM ai_credentials WHERE owner=?').bind('alice').first();}
 });
 test('personal key endpoints require sign-in, same origin, consent and bounded input',async()=>{
   assert.equal((await call(connection,'GET',undefined,null)).status,401);

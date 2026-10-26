@@ -11,6 +11,20 @@
 
 ## Deployment order
 
+### Selecting a model with your own key
+
+In **Settings → Choose your AI connection**, select Gemini, Groq or OpenRouter. Enter your key, or keep **Use my saved API key** selected for an existing connection. Click **Load available models**, search the returned list, choose a model, authorize the connection test, and click **Test and connect** or **Test and save model**.
+
+The catalog is loaded on the server using that user's key. Gemini and Groq return their provider catalogs; OpenRouter's `/models/user` endpoint additionally applies account provider preferences, privacy settings and guardrails. The picker filters non-text models where the catalog identifies them. A listed model is not a guarantee of quota, account permission, availability or structured-output compatibility. The selected model must pass NoteFlow's connection test before it replaces the current connection. OpenRouter's free filter refers to reported input/output token prices; provider limits and other charges still apply.
+
+Changing a saved model does not require entering its key again. The encrypted key is rebound to the new model and credential revision. Queued tasks using the old connection stop; their saved summary parts remain, and the user can resume with the new connection. Saving an unchanged model leaves its revision and queue intact. A failed test leaves the previous connection intact.
+
+Catalog requests require sign-in and same-origin validation, are rate-limited per account, use fixed provider hosts without redirects, and return only bounded model metadata. They do not save a newly entered key or expose a stored key to the browser. Saved-key requests are checked against the signed-in owner and connection revision.
+
+Catalog references: [Gemini models](https://ai.google.dev/api/models), [Groq models](https://console.groq.com/docs/models), [OpenRouter user-filtered models](https://openrouter.ai/docs/api/api-reference/models/list-models-filtered-by-user-provider-preferences-privacy-settings-and-guardrails).
+
+### Operator deployment steps
+
 1. Back up the database and run `npm run db:migrate` against the intended environment. Migration `0003_personal_ai_queue.sql` creates only new tables/indexes; it does not alter existing notes. Never point local QA at the live database.
 2. Run `node scripts/prepare-ai-queue.mjs` locally. It adds missing values to the ignored `.env.local` and prints no credentials.
 3. In Vercel, add **server-only** `BYOK_ENCRYPTION_KEY` and `QUEUE_WORKER_SECRET` from that file, scoped to the intended environment. Do not prefix either with `NEXT_PUBLIC_`. Use different secrets and databases for staging. Keep the encryption key backed up securely and stable across deployments; changing it makes stored keys unreadable and requires users to reconnect.

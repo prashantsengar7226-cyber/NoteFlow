@@ -2,6 +2,10 @@
 
 Implementation is deployed. The production database migration and external scheduler are configured; live results are recorded in [PRODUCTION-ROLLOUT.md](PRODUCTION-ROLLOUT.md). The earlier local provider results below are distinct from the later production worker tests. Real-account production acceptance remains unverified.
 
+Model-picker update, 26 October: 140 automated tests and the production build pass. New checks cover provider catalog filtering/pagination, authenticated fixed endpoints, key redaction, owner/revision isolation, rate limits, sanitized provider failures, saved-key model changes, unchanged-model idempotence and removal during a connection test. Read-only live catalog requests returned 34 Gemini, 4 Groq and 444 OpenRouter text-model candidates for the configured operator keys; 20 OpenRouter entries reported zero input/output token prices. These counts are a snapshot for those keys, not a guarantee for every account or proof that every listed model can generate a valid summary.
+
+The isolated browser suite also passed all ten grouped checks: loading the catalog, connecting a selected model, changing models with the saved key, desktop/mobile layout, queue behavior, account isolation, exports, study tabs and signout. Provider generation and Supabase identity are synthetic in that browser suite. Private evidence: `audit/model-picker-tests.log`, `model-picker-build.log`, `model-picker-browser.log`, `live-model-catalog.json` and the settings screenshots. A real production user's stored key was not used for QA.
+
 | Check | Result and evidence |
 | --- | --- |
 | Automated regression suite | **Pass:** 134 tests; `node tests/run.mjs`. Includes existing auth, billing, exports, source processing and study features, plus private repair feedback, evidence-only retry without regeneration, bounded repeated review failure and backup validation. |

@@ -35,7 +35,7 @@ export async function credential(owner: string) {
 }
 export async function personalAIStatus(owner: string) {
   const row = await credential(owner);
-  return { enabled: personalAIEnabled(), mode: row ? 'personal' : 'shared', provider: row?.provider, model: row?.model };
+  return { enabled: personalAIEnabled(), mode: row ? 'personal' : 'shared', provider: row?.provider, model: row?.model, revision: row?.revision };
 }
 export async function withOwnerAI<T>(owner: string, work: () => Promise<T>, revision?: string): Promise<T> {
   const row = await credential(owner);

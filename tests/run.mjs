@@ -5,6 +5,8 @@ const dest = new URL('../.test-runtime/', import.meta.url);
 await mkdir(dest, { recursive: true });
 const sources = {
   'lib/ai-context.ts':'ai-context.mjs',
+  'lib/ai-models.ts':'ai-models.mjs',
+  'app/api/ai-models/route.ts':'ai-models-route.mjs',
   'lib/personal-ai.ts':'personal-ai.mjs',
   'lib/summary-quality.ts':'summary-quality.mjs',
   'lib/ai-jobs.ts':'ai-jobs.mjs',
@@ -38,7 +40,7 @@ for (const [path, name] of Object.entries(sources)) {
     .transpileModule(text, {
       compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 },
     })
-    .outputText.replace(/(['"])(?:@\/lib\/|\.\/)(ai-context|personal-ai|summary-quality|ai-jobs)\1/g, "'./$2.mjs'")
+    .outputText.replace(/(['"])(?:@\/lib\/|\.\/)(ai-context|ai-models|personal-ai|summary-quality|ai-jobs)\1/g, "'./$2.mjs'")
     .replaceAll("'next/server'", "'./harness.mjs'")
     .replaceAll("'cloudflare:workers'", "'./harness.mjs'")
     .replaceAll("'@/lib/billing'", "'./billing.mjs'")

@@ -13,6 +13,7 @@ import * as exportBatch from '../.test-runtime/export-batch.mjs';
 import * as billing from '../.test-runtime/billing-route.mjs';
 import * as connection from '../.test-runtime/ai-connection.mjs';
 import * as jobs from '../.test-runtime/ai-jobs-route.mjs';
+import * as models from '../.test-runtime/ai-models-route.mjs';
 
 const request = (method, value, headers = {}) => new Request('https://app.example/api/test', {
   method, headers: { origin: 'https://app.example', 'content-type': 'application/json', ...headers },
@@ -22,7 +23,7 @@ const call = (route, method, value, owner) => context.run(owner, () => route[met
 
 test('every protected route and method rejects signed-out and forged identity headers', async () => {
   for (const [route, methods] of [[notes, ['GET','POST','PATCH','DELETE']], [actions,['POST']], [account,['GET']],
-    [workspace,['GET']], [diagnostics,['POST']], [transcribe,['POST']], [exportOne,['POST']], [exportBatch,['POST']], [billing,['POST']], [connection,['GET','POST','DELETE']], [jobs,['GET','POST','DELETE']]]) {
+    [workspace,['GET']], [diagnostics,['POST']], [transcribe,['POST']], [exportOne,['POST']], [exportBatch,['POST']], [billing,['POST']], [connection,['GET','POST','DELETE']], [jobs,['GET','POST','DELETE']], [models,['POST']]]) {
     for (const method of methods) {
       const response = await context.run(null, () => route[method](request(method, {}, {
         'oai-authenticated-user-id': 'forged-admin', 'x-user-id': 'forged-admin', authorization: 'Bearer forged',
