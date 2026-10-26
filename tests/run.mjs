@@ -82,6 +82,7 @@ const result = spawnSync(
     'tests/platform.test.mjs',
     'tests/pwa.test.mjs',
     'tests/personal-ai.test.mjs',
+    'tests/backup.test.mjs',
   ],
   { stdio: 'inherit' },
 );

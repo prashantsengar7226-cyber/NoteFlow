@@ -1,10 +1,10 @@
 # Personal AI / queue verification — 26 October 2026
 
-Implementation is prepared in source. This document does **not** assert that the production migration, Vercel environment settings or external scheduler have been activated.
+Implementation is prepared in source. The production database migration is now applied; rollout progress is recorded in [PRODUCTION-ROLLOUT.md](PRODUCTION-ROLLOUT.md). The provider results below do not establish deployed account or scheduler behavior.
 
 | Check | Result and evidence |
 | --- | --- |
-| Automated regression suite | **Pass:** 132 tests; `node tests/run.mjs`. Includes existing auth, billing, exports, source processing and study features, plus private repair feedback, evidence-only retry without regeneration and bounded repeated review failure. |
+| Automated regression suite | **Pass:** 134 tests; `node tests/run.mjs`. Includes existing auth, billing, exports, source processing and study features, plus private repair feedback, evidence-only retry without regeneration, bounded repeated review failure and backup validation. |
 | TypeScript and production build | **Pass:** Next.js production webpack build, including its TypeScript check. |
 | Shared/personal allowance separation | **Pass:** shared operation 21 denied; personal context executes beyond 20 without consuming either shared AI counter. YouTube limits remain separate. No client mode/owner field grants a bypass. |
 | Key storage and isolation | **Pass:** authenticated encryption binds ciphertext to owner/provider/model/revision; tampering rejected; parallel account contexts remain isolated; connection metadata excludes keys. |
@@ -17,7 +17,7 @@ Implementation is prepared in source. This document does **not** assert that the
 | Secret scan | **Pass within scan scope:** no configured private-secret matches in source or 45 built browser assets. Includes new encryption and worker secrets; pattern scanning is not exhaustive. |
 | Real providers | **Mixed results:** all three connected. Gemini completed the initial synthetic queue. OpenRouter completed after a real evidence-review failure without regenerating the draft. Both retained the shared counter at 20 and rejected deliberately incorrect claims. Groq retried but failed completion because its reviewer rejected supported titles/overviews. Details below. |
 | Supplied full-video quality | **Not passed:** the earlier failed full-video rubric is not reclassified as passed. One fresh Hindi source sample was blocked by invalid reviewer evidence. Automated source checking is fallible and cannot independently validate the source's facts or unseen visuals. |
-| Live cron / production activation | **Pending:** configure the migration, Vercel server-only settings and scheduler using [PERSONAL-AI-SETUP.md](PERSONAL-AI-SETUP.md), then perform browser-closed staging acceptance. |
+| Live cron / production activation | **In progress:** production migration applied; server configuration, deployment and scheduled execution tracked in [PRODUCTION-ROLLOUT.md](PRODUCTION-ROLLOUT.md). Separate staging acceptance remains unavailable. |
 
 Local fixture evidence is in ignored `audit/byok-tests.log`, `audit/byok-build.log`, `audit/workspace-qa.json`, and the desktop/mobile screenshots. The latest regression/build evidence is `audit/live-verification-tests.log` (132 passing) and `audit/live-verification-build.log`. The latest configured-value scan found no private-secret matches in source or 45 browser assets; see `audit/secret-scan.json`.
 

@@ -3,7 +3,7 @@ import { readdir, readFile, writeFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 const root=process.cwd();
-const skip=new Set(['node_modules','.next','.next-staging','.release','.git','.test-runtime','.agents','.codex','outputs']);
+const skip=new Set(['node_modules','.next','.next-staging','.release','.git','.test-runtime','.agents','.codex','.vercel','audit','outputs']);
 async function files(dir) {
   const all=[];
   for(const entry of await readdir(dir,{withFileTypes:true})) {

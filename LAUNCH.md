@@ -1,12 +1,12 @@
 # NoteFlow v0.6 first launch
 
-26 October feature candidate: personal AI connections and durable summary recovery require migration `0003_personal_ai_queue.sql` plus the setup in [PERSONAL-AI-SETUP.md](PERSONAL-AI-SETUP.md). The free cron configuration is prepared; it has not been connected to production. Local verification is recorded in [PERSONAL-AI-VERIFICATION.md](PERSONAL-AI-VERIFICATION.md).
+26 October deployment preparation: migration `0003_personal_ai_queue.sql` is applied to the selected production Turso database. Before applying it, a private SQL snapshot was restored in memory, checked for integrity, and used to rehearse the additive migration. The three new feature tables are verified. All 134 automated checks pass. Vercel production rollout and external cron verification remain pending authenticated service access; do not treat the feature as deployed yet. See [PRODUCTION-ROLLOUT.md](PRODUCTION-ROLLOUT.md) and [PERSONAL-AI-SETUP.md](PERSONAL-AI-SETUP.md).
 
 Prepared 25 October 2026. The site is live at https://note-flow-blue.vercel.app/. Its public login has been inspected; authenticated acceptance remains local with synthetic users. The latest fixes and verification limits are in QUALITY-AUDIT.md. Payments stay disabled. Email confirmation stays off by product decision; email recovery is unavailable.
 
 Audit continuation: the supplied real-video test failed factual-accuracy acceptance despite eventual persistence of every summary part. See VIDEO-QUALITY-AUDIT.md and REFERENCE-ANALYSIS.md. The newer source changes are a review candidate, not a verified complete-video release; do not interpret the automated infrastructure tests as a factual-quality pass.
 
-Readiness verification: local production build and 104 automated tests passed in the latest release check. Deployment preflight passed again during Vercel preparation. Read-only queries confirmed the currently configured Turso database is reachable and all three checked-in migrations are already applied with matching checksums. No migration or customer record was changed. Repeat database verification if a different database is selected for Vercel.
+Earlier first-launch verification: the original production build and 104 automated tests passed before the personal-AI feature was added. The current candidate passed its production build and now passes 134 tests. All four checked-in migrations are applied to the selected database; migration 0003 added tables and indexes without changing existing notes. Repeat database verification if a different database is selected for Vercel.
 
 ## Deploy
 
