@@ -1,6 +1,6 @@
 # NoteFlow pre-launch security and QA audit
 
-26 October addendum: personal AI key storage, per-account request scoping, daily-cap separation and durable summary jobs have been tested locally. See [PERSONAL-AI-VERIFICATION.md](PERSONAL-AI-VERIFICATION.md) for evidence and pending live checks. This addendum does not override the original checklist's unresolved authentication or staging items.
+26 October addendum: personal AI key storage, per-account request scoping, daily-cap separation and durable summary jobs have been tested locally. The latest suite has 132 passing tests; live provider probes use temporary local data, with no customer-account or production-record changes. See [PERSONAL-AI-VERIFICATION.md](PERSONAL-AI-VERIFICATION.md) for evidence, reviewer-recovery fixes and pending deployment checks. This addendum does not override the original checklist's unresolved authentication or staging items.
 
 Reviewed: 25 October 2026 (Asia/Calcutta). Scope: this extracted NoteFlow v0.6 source, local production build, temporary local databases, synthetic users, and read-only Supabase public settings. No live customer data was modified. The later summary fixes used a small live Groq probe and a complete six-part Hindi summary of synthetic educational text through live Groq/OpenRouter providers, consuming provider quota. The latter used only an in-memory test database; see `audit/provider-smoke.json` and `audit/live-summary.json`.
 

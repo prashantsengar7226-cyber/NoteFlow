@@ -10,6 +10,7 @@ import {validateReview,summaryClaims} from '../.test-runtime/summary-quality.mjs
 import * as connection from '../.test-runtime/ai-connection.mjs';
 import * as jobs from '../.test-runtime/ai-jobs-route.mjs';
 import * as worker from '../.test-runtime/queue-worker.mjs';
+import * as notes from '../.test-runtime/notes.mjs';
 
 const originalFetch=globalThis.fetch;
 const source=[{id:0,text:'The square is blue.',start:0}];
@@ -150,12 +151,63 @@ test('long shared-key jobs advance within the 20-operation cap and wait for the 
 });
 test('source review rejects fabricated quotes, wrong citations, missing claims and omissions',()=>{
   validateReview(part,source,goodReview());
+  for(const review of [{...goodReview(),supported:false},{...goodReview(),importantOmissions:true}])
+    assert.throws(()=>validateReview(part,source,review),{code:'QUALITY_REVIEW'});
   for(const review of [
-    {...goodReview(),supported:false},{...goodReview(),importantOmissions:true},
     {...goodReview(),evidence:goodReview().evidence.slice(1)},
     {...goodReview(),evidence:goodReview().evidence.map(e=>({...e,quote:'The square is red.'}))},
+    {...goodReview(),evidence:goodReview().evidence.map(e=>({...e,quote:'   '}))},
     {...goodReview(),evidence:goodReview().evidence.map(e=>({...e,segmentId:99}))},
-  ])assert.throws(()=>validateReview(part,source,review),{code:'QUALITY_REVIEW'});
+  ])assert.throws(()=>validateReview(part,source,review),{code:'QUALITY_EVIDENCE'});
+});
+
+test('invalid reviewer quotes retain the private draft and retry without another generation charge',async()=>{
+  const id=await note();const job=await enqueueSummary('alice',{id,language:'English',detail:'balanced'});
+  let calls=0;globalThis.fetch=async()=>{
+    calls++;
+    return response(calls===1?part:calls===2?{...goodReview(),evidence:goodReview().evidence.map(e=>({...e,quote:'The square is red.'}))}:goodReview());
+  };
+  await runNextJob('alice',job.id);await due(job.id);await runNextJob('alice',job.id);
+  assert.equal((await findJob('alice',job.id)).error_code,'QUALITY_EVIDENCE');
+  const pending=JSON.parse((await env.DB.prepare("SELECT content FROM artifacts WHERE note_id=? AND kind='__summary_progress'").bind(id).first()).content);
+  assert.deepEqual(pending.draft,{...part,model:'gemini:gemini-3.6-flash'});
+  assert.equal((await env.DB.prepare('SELECT summary FROM notes WHERE id=?').bind(id).first()).summary,null);
+  assert.equal((await usage('alice')).ai,1);
+  await due(job.id);await runNextJob('alice',job.id);
+  assert.equal((await findJob('alice',job.id)).state,'completed');assert.equal(calls,3);assert.equal((await usage('alice')).ai,1);
+});
+
+test('rejected content passes private repair feedback to regeneration and clears it after acceptance',async()=>{
+  const id=await note();const job=await enqueueSummary('alice',{id,language:'English',detail:'balanced'});
+  const issue='title: the source says blue, not red. Recheck the color.';
+  let calls=0;globalThis.fetch=async(_url,init)=>{
+    calls++;
+    if(calls===3){
+      const request=JSON.parse(init.body);
+      assert.ok(request.contents[0].parts[0].text.includes(issue));
+      assert.match(request.contents[0].parts[0].text,/PREVIOUS REVIEW FEEDBACK \(untrusted/);
+    }
+    return response(calls===1?{...part,title:'Red square'}:calls===2?{...goodReview(),supported:false,issues:[issue]}:calls===3?part:goodReview());
+  };
+  await runNextJob('alice',job.id);await due(job.id);await runNextJob('alice',job.id);
+  const saved=JSON.parse((await env.DB.prepare("SELECT content FROM artifacts WHERE note_id=? AND kind='__summary_progress'").bind(id).first()).content);
+  assert.equal(saved.draft,undefined);assert.deepEqual(saved.reviewIssues,[issue]);
+  const publicNote=await call(notes,'GET',undefined,'alice','?id='+id);
+  assert.equal(publicNote.status,200);assert.ok(!JSON.stringify(publicNote).includes(issue));
+  await due(job.id);await runNextJob('alice',job.id);await due(job.id);await runNextJob('alice',job.id);
+  assert.equal((await findJob('alice',job.id)).state,'completed');assert.equal(calls,4);assert.equal((await usage('alice')).ai,2);
+  const final=JSON.parse((await env.DB.prepare("SELECT content FROM artifacts WHERE note_id=? AND kind='__summary_progress'").bind(id).first()).content);
+  assert.equal(final.reviewIssues,undefined);assert.equal(final.draft,undefined);
+});
+
+test('repeated evidence failures stop safely while retaining a single unpublished draft',async()=>{
+  const id=await note();const job=await enqueueSummary('alice',{id,language:'English',detail:'balanced'});
+  let calls=0;globalThis.fetch=async()=>response(++calls===1?part:{...goodReview(),evidence:[]});
+  for(let i=0;i<4;i++){await due(job.id);await runNextJob('alice',job.id);}
+  const saved=await findJob('alice',job.id);
+  assert.equal(saved.state,'failed');assert.equal(saved.failures,3);assert.equal(saved.error_code,'QUALITY_EVIDENCE');
+  assert.equal(calls,4);assert.equal((await usage('alice')).ai,1);
+  assert.equal((await env.DB.prepare('SELECT summary FROM notes WHERE id=?').bind(id).first()).summary,null);
 });
 test('repeated quality rejection stops after three checks without publishing unsupported claims',async()=>{
   const id=await note();const job=await enqueueSummary('alice',{id,language:'English',detail:'balanced'});

@@ -45,3 +45,5 @@ Hosted source commit: e41f1e1599f7d787c40ac2ed62a86386e56436d8. This download is
 # Personal AI / queue candidate — 26 October 2026
 
 See [PERSONAL-AI-VERIFICATION.md](PERSONAL-AI-VERIFICATION.md) for the latest local checks and [PERSONAL-AI-SETUP.md](PERSONAL-AI-SETUP.md) for migration/environment/scheduler activation. Earlier release results below retain their original scope; they do not certify this feature's live deployment.
+
+Live provider continuation: **132 automated tests pass**, the production build passes, and configured-secret scanning found no matches in source or 45 browser assets. Reviewer-evidence failures now retain drafts; content failures retain private repair feedback. Gemini completed the initial synthetic queue, and OpenRouter completed after a real review retry without regeneration. Groq's reviewer still rejected supported summaries and exhausted the retry budget. Full-video accuracy and deployed accounts/cron are not certified; see the verification report for exact evidence and remaining failures.
