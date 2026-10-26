@@ -1,6 +1,6 @@
 # Personal AI / queue verification — 26 October 2026
 
-Implementation is prepared in source. The production database migration is now applied; rollout progress is recorded in [PRODUCTION-ROLLOUT.md](PRODUCTION-ROLLOUT.md). The provider results below do not establish deployed account or scheduler behavior.
+Implementation is deployed. The production database migration and external scheduler are configured; live results are recorded in [PRODUCTION-ROLLOUT.md](PRODUCTION-ROLLOUT.md). The earlier local provider results below are distinct from the later production worker tests. Real-account production acceptance remains unverified.
 
 | Check | Result and evidence |
 | --- | --- |
@@ -17,7 +17,7 @@ Implementation is prepared in source. The production database migration is now a
 | Secret scan | **Pass within scan scope:** no configured private-secret matches in source or 45 built browser assets. Includes new encryption and worker secrets; pattern scanning is not exhaustive. |
 | Real providers | **Mixed results:** all three connected. Gemini completed the initial synthetic queue. OpenRouter completed after a real evidence-review failure without regenerating the draft. Both retained the shared counter at 20 and rejected deliberately incorrect claims. Groq retried but failed completion because its reviewer rejected supported titles/overviews. Details below. |
 | Supplied full-video quality | **Not passed:** the earlier failed full-video rubric is not reclassified as passed. One fresh Hindi source sample was blocked by invalid reviewer evidence. Automated source checking is fallible and cannot independently validate the source's facts or unseen visuals. |
-| Live cron / production activation | **In progress:** production migration applied; server configuration, deployment and scheduled execution tracked in [PRODUCTION-ROLLOUT.md](PRODUCTION-ROLLOUT.md). Separate staging acceptance remains unavailable. |
+| Live cron / production activation | **Pass for deployed scheduling and Gemini completion:** cron-driven generation, source review, personal-key counter separation and cleanup verified on disposable operator fixtures. **OpenRouter completion failed:** automatic recovery preserved its draft, but repeated review timeouts exhausted the retry budget. See [PRODUCTION-ROLLOUT.md](PRODUCTION-ROLLOUT.md). Separate staging and real-account production acceptance remain unavailable. |
 
 Local fixture evidence is in ignored `audit/byok-tests.log`, `audit/byok-build.log`, `audit/workspace-qa.json`, and the desktop/mobile screenshots. The latest regression/build evidence is `audit/live-verification-tests.log` (132 passing) and `audit/live-verification-build.log`. The latest configured-value scan found no private-secret matches in source or 45 browser assets; see `audit/secret-scan.json`.
 
