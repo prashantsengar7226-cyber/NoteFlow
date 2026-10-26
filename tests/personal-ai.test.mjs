@@ -103,6 +103,17 @@ test('source notes are available while the first provider request is still pendi
   assert.equal((await findJob('alice',job.id)).completed_parts,0);
 });
 
+test('reenqueue backfills source notes for an older cooldown without moving its retry or calling AI',async()=>{
+  const id=await note();const job=await enqueueSummary('alice',{id,language:'English',detail:'balanced'});
+  const next=Date.now()+3600000;
+  await env.DB.prepare('UPDATE notes SET summary=NULL WHERE id=?').bind(id).run();
+  await env.DB.prepare("UPDATE ai_jobs SET state='retry',error_code='PROVIDER_LIMIT',next_at=? WHERE id=?").bind(next,job.id).run();
+  globalThis.fetch=async()=>{throw new Error('No AI call allowed');};
+  const resumed=await enqueueSummary('alice',{id,language:'English',detail:'balanced'});
+  assert.equal(resumed.id,job.id);assert.equal(resumed.next_at,next);assert.equal(resumed.state,'retry');
+  assert.equal((await savedSummary(id)).fallback.reason,'PROVIDER_LIMIT');assert.equal((await usage('alice')).ai,0);
+});
+
 test('encrypted credentials are authenticated to owner, provider, model and revision',async()=>{
   const row=await key();assert.equal(openKey(row),'personal-fixture-credential');
   assert.ok(!row.ciphertext.includes('personal-fixture'));

@@ -32,7 +32,8 @@ information shown only on video slides are not corrected by this feature.
 - A rejected draft stays private. Checked AI parts, repair feedback and the
   current provider/model/key remain intact. Existing completed AI summaries are
   never replaced by the fallback.
-- Writes require the owning job's active lease, matching owner, matching source
+- Worker writes require the owning job's active lease; enqueue writes require an
+  active owner-scoped job, including older jobs waiting in a cooldown. Both require matching owner, matching source
   and matching prior summary. Cancellation or a newer write wins the race.
 - Source text renders as text, with existing authenticated access and export
   checks. No new public route or authentication exception is introduced.
@@ -40,7 +41,7 @@ information shown only on video slides are not corrected by this feature.
 
 ## Verification
 
-- 149 automated tests passed, including quota exhaustion, early availability
+- 150 automated tests passed, including older cooldown recovery, quota exhaustion, early availability
   during a pending provider call, cancellation, evidence failure, completed-AI
   preservation, owner isolation and bounded Unicode excerpts.
 - Production webpack build and type checking passed.

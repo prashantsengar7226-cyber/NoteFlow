@@ -43,6 +43,7 @@ export async function enqueueSummary(owner: string, input: z.infer<typeof jobInp
   if (existing) {
     if (existing.language !== input.language || existing.detail !== input.detail)
       throw new AppError(409, 'JOB_PREFERENCES', 'Cancel the queued summary before changing its language or detail.');
+    await saveSourceNotes(existing, undefined, existing.error_code ?? 'AI_PENDING');
     return { ...existing, note_title: note.title };
   }
   const pending = await db().prepare(`SELECT COUNT(*) AS count FROM ai_jobs WHERE owner=? AND state IN ${active}`).bind(owner).first<{count:number}>();
@@ -54,6 +55,7 @@ export async function enqueueSummary(owner: string, input: z.infer<typeof jobInp
     .bind(crypto.randomUUID(), owner, note.id, input.language, input.detail, connection?.revision ?? 'shared', now, now, now, owner).run();
   const saved = await db().prepare(`SELECT * FROM ai_jobs WHERE owner=? AND note_id=? AND state IN ${active}`).bind(owner, note.id).first<AIJob>();
   if (!saved) throw new AppError(429,'QUEUE_FULL','Your queue is full. Finish or cancel a task first.');
+  await saveSourceNotes(saved, undefined, 'AI_PENDING');
   return { ...saved, note_title: note.title };
 }
 export async function findJob(owner: string, id: string) {
@@ -70,7 +72,7 @@ const fallbackErrors = new Set(['AI_PENDING','DAILY_LIMIT','PROVIDER_LIMIT','PRO
   'TIMEOUT','PROVIDER_BUSY','PROVIDER_NETWORK','PROVIDER_UNAVAILABLE','PROVIDER_ERROR',
   'PROVIDER_AUTH','PROVIDER_REQUEST','MODEL_UNAVAILABLE','PROVIDER_INPUT_LIMIT','PROVIDER_RESPONSE','PROVIDER_RESPONSE_LIMIT',
   'INVALID_AI_OUTPUT','INVALID_CITATION','OUTPUT_LIMIT','AI_BLOCKED','QUALITY_REVIEW','QUALITY_EVIDENCE']);
-async function saveSourceNotes(job: AIJob, token: string, code: string) {
+async function saveSourceNotes(job: AIJob, token: string | undefined, code: string) {
   if (!fallbackErrors.has(code)) return;
   const note = await ownedNote(job.note_id, job.owner);
   const existing = note.summary ? JSON.parse(note.summary) as Summary : null;
@@ -83,8 +85,9 @@ async function saveSourceNotes(job: AIJob, token: string, code: string) {
   // A cancellation, replacement summary, deletion or source edit wins the race.
   await db().prepare(`UPDATE notes SET summary=?,updated_at=? WHERE id=? AND owner=? AND status='ready'
     AND summary IS ? AND transcript=? AND EXISTS
-    (SELECT 1 FROM ai_jobs WHERE id=? AND owner=? AND state='running' AND lease_token=?)`)
-    .bind(JSON.stringify(summary), Date.now(), note.id, job.owner, note.summary, note.transcript, job.id, job.owner, token).run();
+    (SELECT 1 FROM ai_jobs WHERE id=? AND owner=? AND state IN ${active}
+      ${token ? "AND state='running' AND lease_token=?" : ''})`)
+    .bind(JSON.stringify(summary), Date.now(), note.id, job.owner, note.summary, note.transcript, job.id, job.owner, ...(token ? [token] : [])).run();
 }
 
 /** One durable generation OR source-review step per invocation. */
