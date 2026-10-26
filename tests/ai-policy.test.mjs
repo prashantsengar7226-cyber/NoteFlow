@@ -106,7 +106,13 @@ test('queued Vertex generation and review count once; replay is free and cancell
     const payload=JSON.parse(init.body);
     const review=payload.systemInstruction.parts[0].text.includes('skeptical source reviewer');
     assert.equal(payload.generationConfig.maxOutputTokens,16384);
-    if(review)assert.deepEqual(payload.generationConfig.responseSchema.properties.claims.items.properties.sourceIds.items.enum,['0:0']);
+    if(review){
+      const claims=payload.generationConfig.responseSchema.properties.claims;
+      assert.deepEqual(claims.items.properties.sourceIds.items.enum,['0:0']);
+      assert.equal(claims.items.properties.sourceIds.minItems,1);
+      assert.deepEqual(claims.items.propertyOrdering,['claimId','sourceIds','reason','verdict']);
+      assert.equal(claims.minItems,undefined);assert.equal(claims.maxItems,undefined);
+    }
     return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(review?{claims:summaryClaims(part).map(c=>({claimId:c.id,verdict:'supported',reason:'',sourceIds:['0:0']})),omissions:[]}:part)}]}}]});
   };
   const job=await enqueueSummary(owner,{id,language:'English',detail:'balanced'});

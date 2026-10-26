@@ -7,6 +7,17 @@ import {env} from '../.test-runtime/harness.mjs';
 import {enqueueSummary,runNextJob,findJob} from '../.test-runtime/ai-jobs.mjs';
 import {weeklyUsage} from '../.test-runtime/ai-policy.mjs';
 const local=parseEnv(await readFile('.env.local','utf8'));
+const originalFetch=globalThis.fetch;
+globalThis.fetch=async(...args)=>{
+ const response=await originalFetch(...args);
+ if(response.status===400 && String(args[0]).startsWith('https://aiplatform.googleapis.com/')){
+  const data=await response.clone().json().catch(()=>({}));
+  let message=String(data.error?.message||'');
+  for(const value of Object.values(local))if(value.length>8)message=message.replaceAll(value,'[redacted]');
+  console.warn(JSON.stringify({providerSchemaError:message.slice(0,1600)}));
+ }
+ return response;
+};
 Object.assign(env,{AI_FEATURE_ROUTING:'true',VERTEX_ENABLED:'true',VERTEX_PROJECT_ID:local.VERTEX_PROJECT_ID,VERTEX_SERVICE_ACCOUNT_JSON:local.VERTEX_SERVICE_ACCOUNT_JSON,VERTEX_LOCATION:'global',VERTEX_MODEL:process.argv.find(x=>x.startsWith('--model='))?.slice(8)||'gemini-3.8-flash',VERTEX_CREDIT_EXPIRES_AT:'2027-01-18T00:00:00Z',VERTEX_DAILY_REQUEST_CAP:process.argv.includes('--note')?'60':'8',VERTEX_TOTAL_REQUEST_CAP:process.argv.includes('--note')?'60':'8'});
 const owner='vertex-live-synthetic',id=crypto.randomUUID();
 const englishSegments=[{id:0,start:0,text:'A classroom experiment compared two groups of ten students. Group A practiced recall on Monday and Thursday. Group B reread the lesson only on Thursday.'},{id:1,start:30,text:'On Friday, Group A averaged eight correct answers out of ten. Group B averaged six. This small experiment does not prove that spaced practice works for everyone.'}];
@@ -21,7 +32,7 @@ for(let attempt=0;attempt<(fixture?60:6);attempt++){
  const started=Date.now(); await runNextJob(owner,job.id); console.log(JSON.stringify({elapsedMs:Date.now()-started}));finished=await findJob(owner,job.id);
  console.log(JSON.stringify({attempt:attempt+1,state:finished.state,code:finished.error_code,parts:finished.completed_parts}));
  const record=await env.DB.prepare("SELECT content FROM artifacts WHERE note_id=? AND kind='__summary_progress'").bind(id).first();if(record){const progress=JSON.parse(record.content);if(fixture)await writeFile('audit/production/real-note-test-progress.json',JSON.stringify({progress,segments}));if(finished.error_code)console.log(JSON.stringify({evidenceIssues:progress.evidenceIssues,reviewIssues:progress.reviewIssues}));}
- if(['completed','failed'].includes(finished.state)||(process.argv.includes('--first-part')&&finished.completed_parts>=1))break;
+ if(['completed','failed'].includes(finished.state)||(process.argv.includes('--first-part')&&finished.completed_parts>=1)||(process.argv.includes('--one-more')&&finished.completed_parts>(fixture?.progress.parts.length??0)))break;
  if(finished.error_code && !['QUALITY_REVIEW','QUALITY_EVIDENCE','PROVIDER_LIMIT','PROVIDER_COOLDOWN'].includes(finished.error_code))break;
  if(fixture){
   const wait=Math.max(15000,finished.next_at-Date.now());
@@ -34,4 +45,4 @@ for(let attempt=0;attempt<(fixture?60:6);attempt++){
 const usage=await weeklyUsage(owner); const row=await env.DB.prepare('SELECT summary FROM notes WHERE id=?').bind(id).first(); if(process.argv.includes('--hindi')||fixture)await writeFile(fixture?'audit/production/vertex-real-note-result.json':'audit/production/vertex-hindi-result.json',row.summary||'null');
 const report={checkedAt:new Date().toISOString(),state:finished.state,code:finished.error_code,parts:finished.completed_parts,total:finished.total_parts,weeklyUsed:usage.used,model:env.VERTEX_MODEL,scope:fixture?'User-authorized transcript; temporary in-memory database; real Vertex inference; at most 60 queue steps':'Synthetic source only; in-memory database; real Vertex inference; at most six queue steps'};
 await writeFile(fixture?'audit/production/vertex-real-note-workflow.json':process.argv.includes('--hindi')?'audit/production/vertex-hindi-workflow.json':'audit/production/vertex-workflow.json',JSON.stringify(report,null,2));console.log(JSON.stringify(report));
-if(process.argv.includes('--first-part'))assert.ok(finished.completed_parts>=1);else assert.equal(finished.state,'completed');assert.equal(usage.used,1);
+if(process.argv.includes('--one-more'))assert.ok(finished.completed_parts>(fixture?.progress.parts.length??0));else if(process.argv.includes('--first-part'))assert.ok(finished.completed_parts>=1);else assert.equal(finished.state,'completed');assert.equal(usage.used,1);

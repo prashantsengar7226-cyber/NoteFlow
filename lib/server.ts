@@ -502,9 +502,16 @@ function structuredSchema(schema: z.ZodTypeAny): Record<string, unknown> {
         ]),
       ),
       required: Object.keys(schema.shape),
+      propertyOrdering: Object.keys(schema.shape),
     };
-  if (schema instanceof z.ZodArray)
-    return { type: 'ARRAY', items: structuredSchema(schema.element as z.ZodTypeAny) };
+  if (schema instanceof z.ZodArray) {
+    const bounds=z.toJSONSchema(schema);
+    return { type: 'ARRAY', items: structuredSchema(schema.element as z.ZodTypeAny),
+      // Large nested array bounds make Vertex reject otherwise valid schemas.
+      // Enforce non-empty evidence here; full cardinality remains checked by Zod.
+      ...(bounds.minItems === 1 ? {minItems:1} : {}),
+    };
+  }
   if (schema instanceof z.ZodNumber) return { type: schema.isInt ? 'INTEGER' : 'NUMBER' };
   if (schema instanceof z.ZodBoolean) return { type: 'BOOLEAN' };
   if (schema instanceof z.ZodEnum) return { type: 'STRING', enum: schema.options };

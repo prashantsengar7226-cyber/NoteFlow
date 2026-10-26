@@ -9,6 +9,10 @@ credential, or production audit fixture is included in this repository.
 - Vertex response schemas now preserve enumerated IDs. Reviews select existing
   source passages; the server resolves the original Unicode text instead of
   requiring the model to retype evidence quotes.
+- Evidence lists must be non-empty, and every claim must have exactly one verdict.
+  The provider emits evidence and its brief comparison before the final verdict.
+  Full cardinality is validated server-side; large nested schema bounds are
+  omitted because live Vertex rejected them with HTTP 400.
 - Each summary claim receives a source-fidelity verdict. Missing claims,
   unsupported claims, substantive omissions and invalid evidence still prevent
   publication. Citation metadata can be corrected only after a positive review;
@@ -37,8 +41,18 @@ credential, or production audit fixture is included in this repository.
 - The authorized long Hindi transcript test preserves checked progress across
   retries. Initial runs reproduced evidence-format errors, output truncation,
   false source-review objections and a provider 429. Subsequent runs use the
-  repaired review format, output settings and queue pacing. Full completion and
-  live deployment results are recorded separately after verification.
+  repaired review format, output settings and queue pacing. The complete test
+  finished 20/20 parts, processed 204/204 source segments (78,087 characters), and
+  saved 198 key points and 77 chapters. The saved result is AI output, with no
+  extractive fallback. This was a resumed test; earlier checked parts were retained.
+- The production summary diagnostic returned HTTP 200 using Vertex AI / Gemini
+  3.5 Flash in 1,561 ms. Live desktop/mobile checks confirmed that source excerpts
+  are under Transcript and checked partial AI output is visible in Summary.
+- Production subsequently exhausted its repair budget on a section containing
+  transcription errors. That exact section passed generation and review in a
+  temporary test after correcting verdict order (about 4.7s and 5.4s per call).
+  Deployment and the selected production task must be monitored independently;
+  temporary completion does not prove that a production job has completed.
 
 ## Accuracy boundary
 
