@@ -228,6 +228,7 @@ export type RouterCandidate = {
   key: string;
   model: string;
   fallbackModel?: string;
+  freeOnly?: boolean;
 };
 export type RouterResult = { response: Response; provider: RouterProvider; model: string; elapsedMs: number };
 export type RouterOptions = {
@@ -276,7 +277,7 @@ async function compatibleGenerate(
       response_format: schema && (!isGroq || ['openai/gpt-oss-120b','openai/gpt-oss-20b','qwen/qwen3.8-27b','meta-models/muse-spark-open'].includes(candidate.model))
         ? { type: 'json_schema', json_schema: { name: 'noteflow_output', strict: true, schema } }
         : { type: 'json_object' },
-      ...(!isGroq && schema ? { provider: { require_parameters: true } } : {}),
+      ...(!isGroq && (schema || candidate.freeOnly) ? { provider: { require_parameters: !!schema, ...(candidate.freeOnly ? { max_price: { prompt: 0, completion: 0, request: 0 } } : {}) } } : {}),
       max_tokens: 8192,
       temperature: 0.2,
     }),

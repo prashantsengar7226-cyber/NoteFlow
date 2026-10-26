@@ -5,6 +5,8 @@ import { guard, json, config, handleError, usage, account } from '@/lib/server';
 import { nextReset } from '@/lib/plans';
 import { publicBilling } from '@/lib/billing';
 import { personalAIStatus, withOwnerAI } from '@/lib/personal-ai';
+import { featureRouting, weeklyUsage } from '@/lib/ai-policy';
+import { vertexReady } from '@/lib/vertex';
 export async function GET(r: Request) {
   try {
     const owner = await guard(r);
@@ -13,7 +15,10 @@ export async function GET(r: Request) {
     const connection = await personalAIStatus(owner);
     const plan = await account(owner);
     return json({
-      ai: !!c.aiKey,
+      ai: !!c.aiKey || (featureRouting() && vertexReady()),
+      featureRouting: featureRouting(),
+      weeklyAI: featureRouting() ? await weeklyUsage(owner) : null,
+      vertex: featureRouting() && vertexReady(),
       connection,
       provider: c.provider,
       providers: c.candidates.map(candidate => candidate.provider),
@@ -25,7 +30,7 @@ export async function GET(r: Request) {
       access: plan.access,
       billing: publicBilling(),
       limits: plan.limits,
-      dailyLimits: { ...plan.daily, ai: connection.mode === 'personal' ? null : plan.daily.ai },
+      dailyLimits: { ...plan.daily, ai: featureRouting() || connection.mode === 'personal' ? null : plan.daily.ai },
       usage: await usage(owner),
       resetAt: nextReset(),
       version: '0.6.0',

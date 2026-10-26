@@ -7,6 +7,9 @@ export async function queueRequest<T>(path:string, method='GET', value?:unknown)
   return data;
 }
 export function jobMessage(job:PublicJob) {
+  if (job.errorCode === 'WEEKLY_LIMIT') return `Your weekly summary and insight allowance is used. Retry scheduled for ${new Date(job.nextAt).toLocaleString()}. Source notes remain available.`;
+  if (job.errorCode === 'VERTEX_CAP') return 'Site AI processing is paused at its safety limit. Source notes and smaller tools remain available.';
+  if (job.errorCode === 'VERTEX_NOT_CONFIGURED' || job.errorCode === 'VERTEX_AUTH') return 'AI summaries need the site owner to finish the Vertex connection. Your source notes are ready.';
   if (job.state === 'failed') {
     if (job.errorCode === 'QUALITY_REVIEW' || job.errorCode === 'QUALITY_EVIDENCE') return 'Source checks could not confirm this part. Your transcript and checked parts are saved. Review the transcript or select another model in AI settings, then resume.';
     if (job.errorCode === 'INVALID_AI_OUTPUT' || job.errorCode === 'INVALID_CITATION') return 'The model repeatedly returned an unusable response. Your saved work is safe. Select another available model in AI settings, then resume.';

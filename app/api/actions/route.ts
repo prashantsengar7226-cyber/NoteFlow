@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 180;
 import { z } from 'zod';
 import { withOwnerAI, withAILease } from '@/lib/personal-ai';
+import { featureRouting, withAIFeature, reserveOperation, settleOperation } from '@/lib/ai-policy';
 import { summaryStep, clearPausedSummary } from '@/lib/summary-progress';
 import {
   guard,
@@ -59,6 +60,7 @@ const inputSchema = z.object({
 });
 export async function POST(r: Request) {
   let refund: (() => Promise<void>) | undefined;
+  let reservation: { owner:string; id:string } | undefined;
   try {
     const owner = await guard(r, true);
     const input = inputSchema.parse(await body(r));
@@ -72,14 +74,25 @@ export async function POST(r: Request) {
         'Wait for the transcript to finish before generating study materials.',
       );
     const segments = JSON.parse(note.transcript) as Segment[];
-    if (input.action === 'summary' && input.incremental)
-      return json(await summaryStep(note, owner, segments, input));
+    if (input.action === 'summary' && (input.incremental || featureRouting()))
+      return json(await summaryStep(note, owner, segments, {...input, qualityCheck: featureRouting()}));
     if (input.action === 'summary' && segments.reduce((n, s) => n + s.text.length, 0) > 60000)
       throw new AppError(
         409,
         'REFRESH_REQUIRED',
         'Refresh Noteflow to summarize this longer source in saved parts.',
       );
+    if (input.action === 'summary' || input.action === 'insights') {
+      if (featureRouting() && input.action === 'insights') {
+        const cached = await db().prepare("SELECT content FROM artifacts WHERE note_id=? AND kind='insights'").bind(note.id).first<{content:string}>();
+        if (cached) {
+          const value = JSON.parse(cached.content);
+          if (value.language === input.language) return json({result:value});
+        }
+      }
+      reservation = { owner, id: crypto.randomUUID() };
+      await reserveOperation(owner, reservation.id, input.action);
+    }
     if (input.action !== 'basic' && config().aiKey) {
       await availableAIProviders();
       const units =
@@ -204,10 +217,12 @@ export async function POST(r: Request) {
           )
           .run();
     }
+    if (reservation) await settleOperation(owner, reservation.id, true);
     return json({ result, ...(added === undefined ? {} : { added }) });
     };
-    return await (input.action === 'basic' ? withAILease(owner, execute) : withOwnerAI(owner, () => withAILease(owner, execute)));
+    return await (input.action === 'basic' ? withAILease(owner, execute) : withOwnerAI(owner, () => withAIFeature(input.action, () => withAILease(owner, execute))));
   } catch (e) {
+    if (reservation) await settleOperation(reservation.owner, reservation.id, false).catch(() => {});
     await refund?.().catch(() =>
       console.error(JSON.stringify({ event: 'quota_refund_failed', service: 'ai' })),
     );

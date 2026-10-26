@@ -17,6 +17,8 @@ import {
 import { FEATURE_LIST, FREE_PLAN } from '@/lib/plans';
 
 type AccountData = {
+  featureRouting?: boolean;
+  weeklyAI?: {used:number;limit:number|null;resetAt:number}|null;
   profile: { name: string; email: string; joinedAt: number };
   plan: {
     id: string;
@@ -277,7 +279,7 @@ export function AccountPanel({
                 <div>
                   <strong>Full access. Free while we launch.</strong>
                   <p>
-                    Use every available study tool with your daily allowance. NoteFlow does not
+                    Use every available study tool within the allowances shown below. NoteFlow does not
                     charge during launch. A connected personal AI provider may charge for requests.
                   </p>
                 </div>
@@ -352,7 +354,7 @@ export function AccountPanel({
                     ))}
                   </ul>
                   <p className="price-footnote">
-                    {data.billing.launch ? FREE_PLAN.daily.ai : 0} AI operations and{' '}
+                    {data.featureRouting ? '20 summaries and insights per week; small AI tools have no daily cap. ' : `${data.billing.launch ? FREE_PLAN.daily.ai : 0} AI operations per day. `}
                     {data.billing.launch ? FREE_PLAN.daily.youtube : 0} YouTube imports per day
                     {data.billing.launch ? ' during launch' : ''}. Shared service limits also apply.
                   </p>
@@ -397,8 +399,7 @@ export function AccountPanel({
                     </li>
                     <li>
                       <Check size={15} />
-                      {FREE_PLAN.daily.ai} AI operations + {FREE_PLAN.daily.youtube} YouTube imports
-                      daily
+                      {data.featureRouting ? '20 summaries and insights weekly; small AI tools without a daily cap' : `${FREE_PLAN.daily.ai} AI operations daily`} + {FREE_PLAN.daily.youtube} YouTube imports daily
                     </li>
                   </ul>
                   <button
@@ -427,8 +428,8 @@ export function AccountPanel({
                 <div>
                   <h2>Your NoteFlow allowance</h2>
                   <p className="muted">
-                    Resets{' '}
-                    {new Date(data.resetAt).toLocaleString(undefined, {
+                    {data.featureRouting ? 'Weekly summaries and insights reset ' : 'Resets '}
+                    {new Date(data.featureRouting ? data.weeklyAI?.resetAt ?? data.resetAt : data.resetAt).toLocaleString(undefined, {
                       hour: 'numeric',
                       minute: '2-digit',
                       month: 'short',
@@ -442,10 +443,10 @@ export function AccountPanel({
               <div className="usage-card-grid">
                 {[
                   {
-                    label: 'AI operations',
+                    label: data.featureRouting ? 'Summaries & insights this week' : 'AI operations',
                     icon: Sparkles,
-                    used: data.usage.ai,
-                    max: data.plan.daily.ai,
+                    used: data.featureRouting ? data.weeklyAI?.used ?? 0 : data.usage.ai,
+                    max: data.featureRouting ? data.weeklyAI?.limit ?? null : data.plan.daily.ai,
                   },
                   {
                     label: 'YouTube imports',
@@ -467,20 +468,19 @@ export function AccountPanel({
                     </span>
                     <strong>
                       {item.used.toLocaleString()}
-                      <small>/ {item.max.toLocaleString()}</small>
+                      <small>{item.max === null ? ' · admin, no user cap' : `/ ${item.max.toLocaleString()}`}</small>
                     </strong>
-                    <progress
+                    {item.max !== null && <progress
                       max={Math.max(item.max, 1)}
                       value={Math.min(item.used, item.max)}
                       aria-label={`${item.label} used`}
-                    />
-                    <p>{Math.max(0, item.max - item.used).toLocaleString()} remaining</p>
+                    />}
+                    <p>{item.max === null ? 'Site safety limits apply' : `${Math.max(0, item.max - item.used).toLocaleString()} remaining`}</p>
                   </div>
                 ))}
               </div>
               <p className="usage-note">
-                Personal keys have no NoteFlow daily AI cap; provider limits and charges apply. The counters above track NoteFlow AI and YouTube imports. Long sources can use several AI operations. Shared provider limits can be reached
-                before your personal allowance.
+                {data.featureRouting ? 'Weekly summaries and insights reset Monday at 00:00 IST. Each full summary counts once, including automatic retries. Small AI tools have no daily cap; provider limits apply. YouTube imports reset daily.' : 'Long sources can use several AI operations. Shared provider limits can be reached before your allowance.'} Personal keys have no NoteFlow AI allowance; provider limits and charges apply.
               </p>
             </section>
             <section className="purchase-history">
@@ -554,14 +554,14 @@ export function AccountPanel({
                   <summary>Can I use all the tools for free right now?</summary>
                   <p>
                     {data.billing.launch
-                      ? 'Yes. All currently available tools are included during the free launch. Daily AI and import allowances still apply, and availability depends on configured services.'
+                      ? 'Yes. Available tools are included during the free launch. The allowances shown above and provider capacity still apply.'
                       : 'The free launch has ended. Basic tools and saved work remain available; Pro enables AI tools and YouTube imports.'}
                   </p>
                 </details>
                 <details>
                   <summary>Does a one-time purchase mean unlimited AI?</summary>
                   <p>
-                    No. Each AI request has an ongoing provider cost. Your plan includes the daily
+                    No. Each AI request uses provider capacity. Your plan includes the
                     allowances shown above, subject to shared service capacity.
                   </p>
                 </details>

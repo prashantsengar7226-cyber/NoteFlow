@@ -19,3 +19,9 @@ test('launch cannot pass using an unselected provider or invalid routing order',
   for(const change of [{AI_PROVIDER:'gemini'},{GROQ_API_KEY:''},{AI_PROVIDER_ORDER:'gemini'},{AI_PROVIDER_ORDER:'typo'},{AI_PROVIDER:'unknown'}])
     assert.ok(launchErrors({...valid,...change}).length);
 });
+test('Vertex rollout rejects missing setup and personal credentials',()=>{
+  const errors=launchErrors({AI_FEATURE_ROUTING:'true',VERTEX_SERVICE_ACCOUNT_JSON:JSON.stringify({type:'authorized_user'})});
+  assert.ok(errors.some(e=>e.includes('service-account')));
+  assert.ok(errors.some(e=>e.includes('VERTEX_CREDIT_EXPIRES_AT')));
+  assert.ok(errors.some(e=>e.includes('free model')));
+});

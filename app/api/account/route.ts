@@ -5,6 +5,7 @@ import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { guard, account, db, json, handleError, usage } from '@/lib/server';
 import { publicBilling, billingConfig } from '@/lib/billing';
 import { FEATURE_LIST, nextReset } from '@/lib/plans';
+import { featureRouting, weeklyUsage } from '@/lib/ai-policy';
 export async function GET(request: Request) {
   try {
     const owner = await guard(request);
@@ -33,6 +34,8 @@ export async function GET(request: Request) {
         joinedAt: profile?.created_at,
       },
       plan,
+      featureRouting: featureRouting(),
+      weeklyAI: featureRouting() ? await weeklyUsage(owner) : null,
       billing: publicBilling(),
       features: FEATURE_LIST,
       usage: await usage(owner),

@@ -6,6 +6,8 @@ export const aiContext = new AsyncLocalStorage<{
   owner: string;
   candidate?: RouterCandidate;
   revision?: string;
+  feature?: string;
+  operationId?: string;
 }>();
 export const usesPersonalAI = (owner: string) => {
   const scope = aiContext.getStore();

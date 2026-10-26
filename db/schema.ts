@@ -111,6 +111,20 @@ export const billingEvents = sqliteTable('billing_events', {
   kind: text('kind').notNull(),
   processedAt: integer('processed_at').notNull(),
 });
+export const aiOperations = sqliteTable('ai_operations', {
+  owner: text('owner').notNull(),
+  id: text('id').notNull(),
+  feature: text('feature').notNull(),
+  week: integer('week').notNull(),
+  state: text('state', {enum:['reserved','completed','released']}).notNull(),
+  createdAt: integer('created_at').notNull(),
+}, t => [primaryKey({columns:[t.owner,t.id]}), index('ai_operations_week').on(t.owner,t.week,t.state)]);
+export const vertexBudget = sqliteTable('vertex_budget', {
+  project: text('project').primaryKey(),
+  day: integer('day').notNull(),
+  dailyCount: integer('daily_count').notNull(),
+  totalCount: integer('total_count').notNull(),
+});
 export const imports = sqliteTable(
   'import_requests',
   {

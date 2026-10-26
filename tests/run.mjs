@@ -4,6 +4,8 @@ import { spawnSync } from 'node:child_process';
 const dest = new URL('../.test-runtime/', import.meta.url);
 await mkdir(dest, { recursive: true });
 const sources = {
+  'lib/ai-policy.ts':'ai-policy.mjs',
+  'lib/vertex.ts':'vertex.mjs',
   'lib/queue-client.ts':'queue-client.mjs',
   'lib/ai-context.ts':'ai-context.mjs',
   'lib/ai-models.ts':'ai-models.mjs',
@@ -41,7 +43,7 @@ for (const [path, name] of Object.entries(sources)) {
     .transpileModule(text, {
       compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 },
     })
-    .outputText.replace(/(['"])(?:@\/lib\/|\.\/)(ai-context|ai-models|personal-ai|summary-quality|ai-jobs)\1/g, "'./$2.mjs'")
+    .outputText.replace(/(['"])(?:@\/lib\/|\.\/)(ai-policy|vertex|ai-context|ai-models|personal-ai|summary-quality|ai-jobs)\1/g, "'./$2.mjs'")
     .replaceAll("'next/server'", "'./harness.mjs'")
     .replaceAll("'cloudflare:workers'", "'./harness.mjs'")
     .replaceAll("'@/lib/billing'", "'./billing.mjs'")
@@ -67,7 +69,7 @@ await writeFile(
   new URL('harness.mjs', dest),
   await readFile(new URL('./harness.mjs', import.meta.url)),
 );
-const result = spawnSync(
+const result = process.argv.includes('--live-vertex') ? spawnSync(process.execPath,['tests/live-vertex.mjs'],{stdio:'inherit'}) : spawnSync(
   process.execPath,
   process.argv.includes('--live-repair') ? ['--experimental-transform-types', 'tests/live-repair.mjs', ...process.argv.slice(2)] : process.argv.includes('--live-source-review') ? ['--experimental-transform-types', 'tests/live-source-review.mjs', ...process.argv.slice(2)] : process.argv.includes('--live-queue') ? ['--experimental-transform-types', 'tests/live-queue.mjs', ...process.argv.slice(2)] : process.argv.includes('--verify-video-parts') ? ['--experimental-transform-types', 'tests/real-video-parts.mjs', ...process.argv.slice(2)] : process.argv.includes('--real-video-audit') ? ['--experimental-transform-types', 'tests/real-video-audit.mjs', ...process.argv.slice(2)] : process.argv.includes('--quality-benchmark') ? ['--experimental-transform-types', 'tests/quality-benchmark.mjs'] : process.argv.includes('--live-summary') ? ['--experimental-transform-types', 'tests/live-summary.mjs'] : [
     '--experimental-transform-types',
@@ -86,6 +88,7 @@ const result = spawnSync(
     'tests/pwa.test.mjs',
     'tests/personal-ai.test.mjs',
     'tests/backup.test.mjs',
+    'tests/ai-policy.test.mjs',
   ],
   { stdio: 'inherit' },
 );

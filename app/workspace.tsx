@@ -118,6 +118,8 @@ type Status = {
   fallbackModel: string | null;
   limits: { characters: number; batch: number; uploadMB: number; notes: number };
   dailyLimits: { ai: number | null; youtube: number };
+  featureRouting?: boolean;
+  weeklyAI?: { used:number; limit:number|null; resetAt:number } | null;
   connection?: {mode:string;enabled:boolean};
   usage: { ai: number; youtube: number };
   plan: { id: string; name: string; billingEnabled: boolean };
@@ -1088,15 +1090,15 @@ export default function Workspace({ name }: { name: string }) {
                 : 'All available tools, included.'}
             </p>
             <div className="sidebar-usage-label">
-              <span>AI operations today</span>
+              <span>{status?.featureRouting ? 'Summaries & insights this week' : 'AI operations today'}</span>
               <strong>
-                {status?.connection?.mode === 'personal' ? 'Personal key' : `${status?.usage.ai ?? 0} / ${status?.dailyLimits.ai ?? 20}`}
+                {status?.connection?.mode === 'personal' ? 'Personal key' : status?.featureRouting ? (status.weeklyAI?.limit === null ? 'Admin · no user cap' : `${status.weeklyAI?.used ?? 0} / 20`) : `${status?.usage.ai ?? 0} / ${status?.dailyLimits.ai ?? 20}`}
               </strong>
             </div>
             <progress
-              max={Math.max(1, status?.dailyLimits.ai ?? 20)}
-              value={status?.usage.ai ?? 0}
-              aria-label="Daily AI allowance used"
+              max={Math.max(1, status?.featureRouting ? 20 : status?.dailyLimits.ai ?? 20)}
+              value={status?.featureRouting ? status.weeklyAI?.used ?? 0 : status?.usage.ai ?? 0}
+              aria-label={status?.featureRouting ? 'Weekly summaries and insights allowance used' : 'Daily AI allowance used'}
             />
             <button onClick={() => navigate('plans')}>
               View plan & usage <ArrowUpRight size={14} />
@@ -1305,7 +1307,7 @@ export default function Workspace({ name }: { name: string }) {
                 )}
               </div>
             </div>
-            <AISettings onUpdated={refreshUsage} />
+            <AISettings onUpdated={refreshUsage} featureRouting={status?.featureRouting} />
             <section className="settings-panel">
               <h2>Included in your workspace</h2>
               <div className="included-grid">
@@ -1328,19 +1330,19 @@ export default function Workspace({ name }: { name: string }) {
               </p>
             </section>
             <section className="settings-panel">
-              <h2>Your daily allowance</h2>
+              <h2>{status?.featureRouting ? 'Your usage allowances' : 'Your daily allowance'}</h2>
               <p>
-                {status?.connection?.mode === 'personal' ? 'Personal AI: no NoteFlow daily cap' : `${status?.usage.ai ?? 0} of ${status?.dailyLimits.ai ?? 20} NoteFlow AI operations used`} ·{' '}
+                {status?.connection?.mode === 'personal' ? 'Personal AI: no NoteFlow daily cap' : status?.featureRouting ? `${status.weeklyAI?.used ?? 0} summary and insight operations reserved or completed this week${status.weeklyAI?.limit === null ? ' · admin: no user cap' : ' out of 20'}` : `${status?.usage.ai ?? 0} of ${status?.dailyLimits.ai ?? 20} NoteFlow AI operations used`} ·{' '}
                 {status?.usage.youtube ?? 0} of {status?.dailyLimits.youtube ?? 3} YouTube imports
                 used.
               </p>
-              <p>
+              {status?.featureRouting ? <p>Small AI tools have no daily operation cap; provider limits and short-term throttles apply. A full summary counts once, including its automatic retries. Weekly allowance resets Monday at 00:00 IST. YouTube imports reset daily. Basic source notes and PDF utilities do not use AI allowance.</p> : <p>
                 {status?.resetAt
                   ? `Next reset: ${new Date(status.resetAt).toLocaleString()}. `
                   : 'Resets at midnight UTC. '}
                 Each summary part uses an operation and a separate source review. Regenerating a rejected part uses another operation. Provider requests may be billable even when unsuccessful. Shared service limits may be reached sooner. Basic summaries,
                 studying saved material and PDF downloads use no AI allowance.
-              </p>
+              </p>}
             </section>
             <section className="settings-panel">
               <h2>Current processing limits</h2>
@@ -1689,7 +1691,7 @@ export default function Workspace({ name }: { name: string }) {
                             text="Generate a structured summary, or use basic mode to select key sentences directly from your source."
                           />
                         )}
-                        <p className="generation-estimate">{summaryProgress && summaryProgress.language === language && summaryProgress.detail === detail ? summaryProgress.totalParts - summaryProgress.completedParts : summarySourceChunks(note.transcript, detail).length} AI operations for this summary · {status?.connection?.mode === 'personal' ? 'no NoteFlow daily cap; provider limits apply' : `${Math.max(0, (status?.dailyLimits.ai ?? 20) - (status?.usage.ai ?? 0))} available today` }. Detailed keeps smaller sections for more thorough notes.</p>
+                        <p className="generation-estimate">{status?.featureRouting ? 'One weekly operation for this complete summary, including retries' : `${summaryProgress && summaryProgress.language === language && summaryProgress.detail === detail ? summaryProgress.totalParts - summaryProgress.completedParts : summarySourceChunks(note.transcript, detail).length} AI operations for this summary`} · {status?.connection?.mode === 'personal' ? 'no NoteFlow cap; provider limits apply' : status?.featureRouting ? (status.weeklyAI?.limit === null ? 'admin: no user cap' : `${Math.max(0,20-(status.weeklyAI?.used ?? 0))} available this week`) : `${Math.max(0, (status?.dailyLimits.ai ?? 20) - (status?.usage.ai ?? 0))} available today` }. Detailed keeps smaller sections for more thorough notes.</p>
                         <div className="generation-bar">
                           <div className="select-group">
                             <label>
@@ -2401,10 +2403,10 @@ export default function Workspace({ name }: { name: string }) {
                       AI allowance
                     </span>
                     <strong>
-                      {status?.connection?.mode === 'personal' ? 'Personal key' : Math.max(0, (status?.dailyLimits.ai ?? 20) - (status?.usage.ai ?? 0))}
-                      {status?.connection?.mode !== 'personal' && <small> / {status?.dailyLimits.ai ?? 20}</small>}
+                      {status?.connection?.mode === 'personal' ? 'Personal key' : status?.featureRouting ? (status.weeklyAI?.limit === null ? 'Admin' : Math.max(0,20-(status.weeklyAI?.used ?? 0))) : Math.max(0, (status?.dailyLimits.ai ?? 20) - (status?.usage.ai ?? 0))}
+                      {status?.connection?.mode !== 'personal' && status?.weeklyAI?.limit !== null && <small> / {status?.featureRouting ? 20 : status?.dailyLimits.ai ?? 20}</small>}
                     </strong>
-                    <small>{status?.connection?.mode === 'personal' ? 'Provider limits apply' : 'Operations remaining today'}</small>
+                    <small>{status?.connection?.mode === 'personal' ? 'Provider limits apply' : status?.featureRouting ? 'Summaries & insights remaining this week' : 'Operations remaining today'}</small>
                   </div>
                 </div>
                 <div className="dashboard-create-grid">

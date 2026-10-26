@@ -1,5 +1,6 @@
 import { AppError, type Segment, type SummaryProgress } from './core';
-import { usesPersonalAI } from './ai-context';
+import { usesPersonalAI, aiContext } from './ai-context';
+import { featureRouting, reserveOperation, settleOperation } from './ai-policy';
 import { checkSummaryPart, SummaryQualityError, SummaryEvidenceError } from './summary-quality';
 import {
   db,
@@ -107,6 +108,7 @@ export async function clearPausedSummary(note: NoteRow) {
     .first();
   if (!removed)
     throw new AppError(409, 'SUMMARY_CHANGED', 'The summary changed in another window. Try again.');
+  await settleOperation(note.owner,progress.runId,false);
 }
 
 /** One provider call per request. A lease and compare-and-swap protect retries and other tabs. */
@@ -194,7 +196,7 @@ export async function summaryStep(note: NoteRow, owner: string, segments: Segmen
   }
   // Fail before spending the first unit if a new run cannot fit today's budget.
   // Existing runs can still advance across days, preserving all saved work.
-  if (!resume && !input.qualityCheck && !usesPersonalAI(owner)) {
+  if (!featureRouting() && !resume && !input.qualityCheck && !usesPersonalAI(owner)) {
     const [plan, used] = await Promise.all([account(owner), usage(owner)]);
     const remaining = plan.daily.ai - used.ai;
     if (chunks.length > remaining) {
@@ -213,6 +215,7 @@ export async function summaryStep(note: NoteRow, owner: string, segments: Segmen
   if (!claimed) throw conflict();
   let refund: (() => Promise<void>) | undefined;
   try {
+    await reserveOperation(owner, aiContext.getStore()?.operationId ?? progress.runId, 'summary');
     if (!progress.draft) refund = await consumeService(owner, 'ai');
     let part = progress.draft ?? await generateSummaryPart(
       chunks[progress.parts.length],
@@ -260,6 +263,7 @@ export async function summaryStep(note: NoteRow, owner: string, segments: Segmen
     );
     const written = await db().batch(statements);
     if (!written[written.length - 1].results.length) throw conflict();
+    if (complete) await settleOperation(owner, aiContext.getStore()?.operationId ?? progress.runId, true);
     return response(next);
   } catch (error) {
     await refund?.().catch(() =>

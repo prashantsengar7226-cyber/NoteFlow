@@ -6,6 +6,8 @@ import { db, ownedNote } from './server';
 import { nextReset } from './plans';
 import { credential, withOwnerAI, withAILease } from './personal-ai';
 import { summaryStep } from './summary-progress';
+import { aiContext } from './ai-context';
+import { withAIFeature, settleOperation } from './ai-policy';
 
 export const jobInput = z.object({
   id: z.string().uuid(),
@@ -66,9 +68,10 @@ export async function findJob(owner: string, id: string) {
 export async function cancelJob(owner: string, id: string) {
   await findJob(owner, id);
   await db().prepare(`UPDATE ai_jobs SET state='cancelled',updated_at=? WHERE id=? AND owner=? AND state IN ${active}`).bind(Date.now(), id, owner).run();
+  await settleOperation(owner,id,false);
 }
 
-const fallbackErrors = new Set(['AI_PENDING','DAILY_LIMIT','PROVIDER_LIMIT','PROVIDER_COOLDOWN','AI_NOT_CONFIGURED','KEY_UNAVAILABLE','KEY_STORAGE_UNAVAILABLE',
+const fallbackErrors = new Set(['VERTEX_NOT_CONFIGURED','VERTEX_AUTH','VERTEX_CAP','WEEKLY_LIMIT','AI_PENDING','DAILY_LIMIT','PROVIDER_LIMIT','PROVIDER_COOLDOWN','AI_NOT_CONFIGURED','KEY_UNAVAILABLE','KEY_STORAGE_UNAVAILABLE',
   'TIMEOUT','PROVIDER_BUSY','PROVIDER_NETWORK','PROVIDER_UNAVAILABLE','PROVIDER_ERROR',
   'PROVIDER_AUTH','PROVIDER_REQUEST','MODEL_UNAVAILABLE','PROVIDER_INPUT_LIMIT','PROVIDER_RESPONSE','PROVIDER_RESPONSE_LIMIT',
   'INVALID_AI_OUTPUT','INVALID_CITATION','OUTPUT_LIMIT','AI_BLOCKED','QUALITY_REVIEW','QUALITY_EVIDENCE']);
@@ -116,16 +119,16 @@ export async function runNextJob(owner?: string, id?: string) {
       // result never marks the AI job complete and costs no generation quota.
       await saveSourceNotes(job, token, 'AI_PENDING');
       const note = await ownedNote(job.note_id, job.owner);
-      return summaryStep(note, job.owner, JSON.parse(note.transcript) as Segment[], {
+      return aiContext.run({ ...aiContext.getStore()!, operationId: job.id }, () => withAIFeature('summary', () => summaryStep(note, job.owner, JSON.parse(note.transcript) as Segment[], {
         language: job.language, detail: job.detail, runId: job.run_id ?? undefined,
         completedParts: job.run_id ? job.completed_parts : undefined, qualityCheck: true,
-      });
+      })));
     }), job.credential_revision);
     await update('result' in result ? 'completed' : 'queued', null, Date.now() + 15000, result.completedParts > job.completed_parts ? 0 : job.failures, result.runId, result.completedParts, result.totalParts);
   } catch (error) {
     const code = error instanceof AppError ? error.code : 'INTERNAL';
     await saveSourceNotes(job, token, code).catch(() => console.error(JSON.stringify({event:'source_notes_save_failed'})));
-    const waiting = ['DAILY_LIMIT','PROVIDER_LIMIT','PROVIDER_COOLDOWN','AI_BUSY','SUMMARY_IN_PROGRESS'].includes(code);
+    const waiting = ['WEEKLY_LIMIT','VERTEX_CAP','DAILY_LIMIT','PROVIDER_LIMIT','PROVIDER_COOLDOWN','AI_BUSY','SUMMARY_IN_PROGRESS'].includes(code);
     const retryable = waiting || ['TIMEOUT','PROVIDER_BUSY','PROVIDER_NETWORK','PROVIDER_UNAVAILABLE','UPSTREAM_ERROR','PROVIDER_ERROR','NETWORK_ERROR','INVALID_AI_OUTPUT','INVALID_CITATION','OUTPUT_LIMIT','QUALITY_REVIEW','QUALITY_EVIDENCE','INTERNAL'].includes(code);
     const failures = job.failures + (waiting ? 0 : 1);
     const delay = error instanceof AppError && error.retryAfterSeconds ? error.retryAfterSeconds * 1000 : Math.min(900000, 60000 * 2 ** failures);
@@ -134,6 +137,7 @@ export async function runNextJob(owner?: string, id?: string) {
     const nextAt = code === 'DAILY_LIMIT' ? nextReset() + 1000 : Date.now() +
       (code === 'QUALITY_REVIEW' ? Math.max(15000, error instanceof AppError && error.retryAfterSeconds ? error.retryAfterSeconds * 1000 : 0) : Math.max(30000, delay));
     await update(retryable && failures < 3 ? 'retry' : 'failed', code, nextAt, failures);
+    if (!(retryable && failures < 3)) await settleOperation(job.owner,job.id,false);
     console.warn(JSON.stringify({event:'summary_queue_step',state:retryable && failures < 3 ? 'retry':'failed',code}));
   }
 }
