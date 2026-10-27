@@ -28,3 +28,13 @@ Final local browser run: **16 checks passed**, including 12 public/account route
 UI release commit `a3b0670` was pushed to GitHub main and the redesign is live at https://note-flow-blue.vercel.app/. On 27 October 2026, an isolated Edge browser verified all 12 public/account URLs returned HTTP 200 and rendered the new interface. The interactive flashcard preview, mobile navigation/Escape, responsive overflow checks, branded 404 and anonymous `/api/notes` rejection passed with zero browser exceptions. Evidence is saved privately in `audit/production/design-live.json` and production screenshots.
 
 The saved Vercel API connection returned HTTP 403, so deployment metadata could not be inspected through that connection; the canonical production domain was verified directly instead. Authenticated workflows were tested locally with synthetic identities; no new live accounts, notes or AI calls were created for this UI release. Live AI output quality remains outside this verification.
+
+## Reader replacement — 27 October 2026
+
+After the user's review of a 68-topic guide, the reader structure was replaced. The official NoteGPT workplace article supplied the reference for a broad video/transcript pane beside the study pane. AI Chat is now a tenth study tab. Desktop panes scroll independently; the source collapses on phones and the reading document uses natural scrolling.
+
+The inline topic cloud is replaced with a collapsed, bounded contents list, six-topic pages, topic/fact search and a read-all option. The long-guide browser fixture verifies that all 68 Hindi topics and 166 facts remain accessible, including jumping to the final topic, recall controls and searching 204 transcript passages. Both document and video layouts were checked; video playback was intercepted with a clearly labelled local fixture. No provider requests or production records were used.
+
+The final production build and TypeScript compilation pass. The existing automated regression suite passes 166 tests. The final local browser run passes 17 grouped checks, covering the ten study tabs, public/account pages, source import/export, recovery states, mobile navigation, and account isolation. Evidence: ignored `audit/workspace-qa.json`, `audit/reader-browser.log`, `audit/reader-video-desktop.png` and `audit/reader-mobile-viewport.png`.
+
+This is a presentation and navigation change. It does not establish an AI accuracy score or remove upstream model quotas. Authentication, admin authorization, AI routing and saved content are unchanged.

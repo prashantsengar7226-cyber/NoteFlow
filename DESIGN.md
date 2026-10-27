@@ -58,3 +58,15 @@ Every control must work. Tabs support arrows; navigation marks current page. Exi
 Run production build and regressions. Browser-check public home, all supported tool routes, access, help, login validation, navigation, source handoff, library, settings, importer, reading tabs, revision guide and source-only state. Check desktop/phone, keyboard and console errors. Preserve authentication, routing, quotas and data boundaries. Record evidence and limitations; do not claim untested pages or unmeasured AI accuracy.
 
 Implementation and browser evidence will be recorded in `DESIGN-RELEASE.md`.
+
+## Reader replacement — user correction, 27 October 2026
+
+The earlier reader is rejected: excessive margins, a narrow isolated source card, chat far below the source, and a wrapping cloud of 68 topic links made a long note difficult to use. Replace its structure, not just its colors.
+
+Reference: NoteGPT's official workplace guide, https://notegpt.io/blog/how-to-use-the-notegpt-workplace, especially its AI Notes screenshot. It shows a broad source/video/transcript column beside a notes/chat working pane. Use that organization with NoteFlow's full tool set. Retain NoteFlow branding; the annotated reference image is research only, not a shipped asset.
+
+Desktop reader: compact document header; approximately 42% source and 58% tools; video directly above a searchable transcript; notes/chat in the right pane; independent bounded pane scrolling. No unused grid row. All existing tools stay in a consistent tab bar, with Chat added there. Compact progress notices retain their truthful partial/queued state.
+
+Revision guide: overview, compact search/recall toolbar, collapsed searchable contents list, and six topics per page. The contents list is vertical, numbered and bounded; it must never become a wall of inline links. Page controls and an optional read-all mode preserve access to every saved topic/fact and all citations. A real 68-topic Hindi fixture is required for QA; a one-topic sample is insufficient.
+
+Phone: source/video and transcript inside an expandable source section, then the tool pane. No fixed-height reading pane on a phone; the document scrolls naturally. Tool tabs remain keyboard-accessible and wrap. Chat becomes a first-class tool, not a distant floating column. Existing source import, export, authentication, paid routing and generated content remain unchanged.

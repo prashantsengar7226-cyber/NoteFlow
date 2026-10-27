@@ -141,6 +141,7 @@ type Status = {
   resetAt: number;
 };
 type Tab =
+  | 'chat'
   | 'insights'
   | 'summary'
   | 'transcript'
@@ -152,6 +153,7 @@ type Tab =
   | 'translation';
 const tools = [
   { id: 'summary', label: 'Summary', icon: FileText },
+  { id: 'chat', label: 'AI Chat', icon: MessageSquare },
   { id: 'transcript', label: 'Transcript', icon: ListChecks },
   { id: 'notes', label: 'My notes', icon: Pencil },
   { id: 'insights', label: 'Insights', icon: BookOpen },
@@ -835,14 +837,14 @@ export default function Workspace({ name }: { name: string }) {
       refreshUsage();
     }
   }
-  function jump(id: number) {
+  function jump(id: number, keepTool = false) {
     const s = note?.transcript.find((s) => s.id === id);
     setActiveSegment(id);
-    setTab('transcript');
+    if (!keepTool) setTab('transcript');
     setTimeout(
       () =>
         document
-          .getElementById(`segment-${id}`)
+          .getElementById(`${keepTool ? 'source-' : ''}segment-${id}`)
           ?.scrollIntoView({ block: 'center', behavior: 'smooth' }),
       80,
     );
@@ -1371,7 +1373,7 @@ export default function Workspace({ name }: { name: string }) {
             </section>
           </main>
         ) : page === 'note' && note ? (
-          <main id="workspace-main" tabIndex={-1} className="note-content page-enter" key={note.id}>
+          <main id="workspace-main" tabIndex={-1} className="note-content note-reader page-enter" key={note.id}>
             <div className="note-heading">
               <button className="back-link" onClick={() => navigate('library')}>
                 <ArrowLeft size={16} />
@@ -1463,8 +1465,9 @@ export default function Workspace({ name }: { name: string }) {
               />
             ) : (
               <div className="note-grid">
-                <aside className="study-source" aria-label="Source material">
-                  <div className="study-source-heading"><h2>Your source</h2><span>{note.source}</span></div>
+                <details className="study-source" aria-label="Source material" open={!narrowNavigation}>
+                  <summary className="study-source-heading"><h2>Your source</h2><span>{note.source} <ChevronDown size={14}/></span></summary>
+                  <div className="source-reading-column">
                   {note.video_id ? (
                     <div className="video-wrap">
                       <iframe
@@ -1476,10 +1479,17 @@ export default function Workspace({ name }: { name: string }) {
                         referrerPolicy="strict-origin-when-cross-origin"
                       />
                     </div>
-                  ) : <p className="source-preview">{note.transcript.slice(0, 3).map(segment => segment.text).join(' ').slice(0, 340)}{note.transcript.reduce((n, segment) => n + segment.text.length, 0) > 340 ? '…' : ''}</p>}
+                  ) : <div className="source-document-header"><FileText size={28}/><div><strong>{note.title}</strong><span>{note.source} · original text</span></div></div>}
                   <div className="source-facts"><span>{note.transcript.length.toLocaleString()} source sections</span><button onClick={() => setTab('transcript')}>Read transcript <ArrowUpRight size={14}/></button></div>
                   {note.video_id && <p className="source-scope">Notes use the transcript. Visuals and on-screen text are not analyzed.</p>}
-                </aside>
+                  <div className="source-transcript-heading"><h3>Transcript</h3><button className="icon-button" aria-label="Download source transcript" onClick={()=>exportNote('txt')}><Download size={16}/></button></div>
+                  <label className="source-transcript-search"><Search size={16}/><input aria-label="Find in source" placeholder="Find in transcript…" value={transcriptSearch} onChange={e=>setTranscriptSearch(e.target.value)}/></label>
+                  <div className="source-transcript-list" tabIndex={0} aria-label="Original transcript passages">
+                    {note.transcript.filter(s=>s.text.toLocaleLowerCase().includes(transcriptSearch.toLocaleLowerCase())).map(s=><div key={s.id} id={`source-segment-${s.id}`} className={`source-passage ${activeSegment===s.id?'highlight':''}`}><button onClick={()=>jump(s.id,true)} aria-label={`View source at ${s.start!==null?timestamp(s.start):`section ${s.id+1}`}`}>{s.start!==null?timestamp(s.start):`§${s.id+1}`}</button><p>{s.text}</p></div>)}
+                    {!note.transcript.some(s=>s.text.toLocaleLowerCase().includes(transcriptSearch.toLocaleLowerCase()))&&<p className="muted">No matching transcript passages.</p>}
+                  </div>
+                  </div>
+                </details>
                 <section className="note-main">
                   <div
                     className="note-tabs"
@@ -2244,8 +2254,7 @@ export default function Workspace({ name }: { name: string }) {
                         )}
                       </>
                     )}
-                  </div>
-                </section>
+                    {tab === 'chat' && (
                 <aside className="chat-panel">
                   <div className="chat-heading">
                     <IconBox>
@@ -2334,6 +2343,10 @@ export default function Workspace({ name }: { name: string }) {
                   </form>
                   <p className="chat-footnote">Answers use excerpts from this note.</p>
                 </aside>
+                    )}
+                  </div>
+                </section>
+
               </div>
             )}
           </main>
