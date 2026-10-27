@@ -83,3 +83,8 @@ test('job retry/cancel is state-aware, audited and cannot overwrite a worker lea
   assert.equal((await env.DB.prepare('SELECT state FROM ai_jobs WHERE id=?').bind(job).first()).state,'cancelled');
   assert.equal((await env.DB.prepare('SELECT COUNT(*) AS n FROM admin_audit WHERE target=?').bind(job).first()).n,2);
 });
+
+test('overview daily series is bounded, zero-filled and rejects arbitrary date ranges',async()=>{
+ for(const range of ['7','30']){const r=await call(root,'GET',null,null,'?days='+range);assert.equal(r.status,200);const data=(await r.json()).data;assert.equal(data.days.length,Number(range));assert.equal(data.days.at(-1).day,new Date().toISOString().slice(0,10));assert.ok(data.days.every(row=>Number.isInteger(row.count)&&row.count>=0));}
+ assert.equal((await call(root,'GET',null,null,'?days=999999')).status,400);
+});

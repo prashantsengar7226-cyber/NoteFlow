@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { Activity, ArrowLeft, Database, FileClock, LayoutDashboard, ListChecks, Pause, Play, RefreshCw, Search, ShieldCheck, Users, X } from 'lucide-react';
 import type { Role } from '@/lib/access';
+import {AdminOverview} from './overview';
 type View='overview'|'users'|'jobs'|'events'|'audit'|'database';
 type Row=Record<string,string|number|null>;
 type Payload={role:Role;accountId:string;refreshedAt:number;data:{rows?:Row[];totals?:Row;jobs?:Row[];days?:Row[];sources?:Row[];errors?:Row[];vertex?:Row[];lastScheduler?:Row;health?:Record<string,boolean>;window?:string;counts?:Row[];schema?:Row[];migrations?:Row[];policy?:string;retention?:string}};
@@ -11,6 +12,7 @@ const date=(v:unknown)=>typeof v==='number'&&v>0?new Date(v).toLocaleString():'N
 const value=(v:unknown)=>v===null||v===undefined?'—':String(v);
 export default function AdminDashboard({role,owner}:{role:Role;owner:string}) {
   const [view,setView]=useState<View>('overview'),[search,setSearch]=useState(''),[query,setQuery]=useState(''),[page,setPage]=useState(0);
+  const [range,setRange]=useState('7');
   const [data,setData]=useState<Payload|null>(null),[error,setError]=useState(''),[loading,setLoading]=useState(true),[live,setLive]=useState(true),[refresh,setRefresh]=useState(0);
   const [selected,setSelected]=useState<{row:Row;action:'access'|'retry'|'cancel'}|null>(null),[newRole,setNewRole]=useState('user'),[suspended,setSuspended]=useState(false),[reason,setReason]=useState(''),[saving,setSaving]=useState(false),[actionError,setActionError]=useState(''),[notice,setNotice]=useState('');
   const dialog=useRef<HTMLDialogElement>(null);
@@ -20,7 +22,7 @@ export default function AdminDashboard({role,owner}:{role:Role;owner:string}) {
     const load=async()=>{
       if(pending||controller.signal.aborted)return;pending=true;setLoading(true);
       try {
-        const r=await fetch(`/api/admin?${new URLSearchParams({view,page:String(page),search:query})}`,{signal:controller.signal,cache:'no-store'});
+        const r=await fetch(`/api/admin?${new URLSearchParams({view,page:String(page),search:query,days:range})}`,{signal:controller.signal,cache:'no-store'});
         const x=await r.json();if(!r.ok){if(r.status===401||r.status===403)setData(null);throw new Error(x.error||'Administration is unavailable.');}
         if(!controller.signal.aborted){setData(x);setError('');}
       }catch(e){if(!controller.signal.aborted)setError(e instanceof Error?e.message:'Refresh failed.');}
@@ -28,8 +30,8 @@ export default function AdminDashboard({role,owner}:{role:Role;owner:string}) {
     };
     void load();const timer=setInterval(()=>{if(live&&!document.hidden&&!dialog.current?.open)void load();},10000);
     return()=>{controller.abort();clearInterval(timer);};
-  },[view,page,query,live,refresh]);
-  function navigate(next:View){setView(next);setPage(0);setSearch('');setQuery('');setData(null);setNotice('');}
+  },[view,page,query,live,refresh,range]);
+  function navigate(next:View,term=''){setView(next);setPage(0);setSearch(term);setQuery(term);setData(null);setNotice('');}
   function edit(row:Row,action:'access'|'retry'|'cancel') {setSelected({row,action});setNewRole(String(row.role||'user'));setSuspended(!!row.suspended);setReason('');setActionError('');dialog.current?.showModal();}
   async function submit(e:React.FormEvent) {
     e.preventDefault();if(!selected||saving)return;setSaving(true);setActionError('');
@@ -46,12 +48,7 @@ export default function AdminDashboard({role,owner}:{role:Role;owner:string}) {
       <div className="admin-status"><span className={error?'status-warn':'status-ready'}>{error?'Refresh unavailable':loading?'Refreshing…':live?'Auto refresh on':'Updates paused'}</span><span>Updated {data?date(data.refreshedAt):'—'}</span></div>
       {error&&<div className="admin-alert" role="alert">{error} {data&&'Showing the last successful result.'}</div>}{notice&&<p className="admin-notice" role="status">{notice}</p>}
       {!data&&!error?<p role="status" className="admin-loading">Loading administration…</p>:null}
-      {d&&view==='overview'&&<>
-        <dl className="admin-metrics">{[['users','Workspace users'],['active_users','Active in 24 hours'],['notes','Saved notes'],['active_jobs','Pending tasks'],['failed_jobs','Failed tasks'],['admins','Admins & superusers']].map(([k,label])=><div key={k}><dt>{label}</dt><dd>{value(d.totals?.[k])}</dd></div>)}</dl>
-        <div className="admin-columns"><section className="admin-section"><h2>Service connections</h2><p>Configuration status. A configured connection is not a guarantee of upstream availability.</p><ul className="admin-health">{Object.entries(d.health||{}).map(([name,ok])=><li key={name}><span>{({database:'Workspace database',vertex:'Paid Vertex AI',scheduler:'Background scheduler',freeAI:'Free AI connection',transcripts:'Video transcript provider'} as Record<string,string>)[name]}</span><strong className={ok?'status-ready':'status-warn'}>{ok?'Configured':'Unavailable'}</strong></li>)}</ul><p>Last scheduler request: <strong>{date(d.lastScheduler?.last_seen)}</strong></p></section><section className="admin-section"><h2>Summary pipeline</h2><ul className="admin-health">{d.jobs?.length?d.jobs.map(r=><li key={value(r.state)}><span>{value(r.state)}</span><strong>{value(r.count)}</strong></li>):<li>No summary tasks recorded.</li>}</ul><p>Admins have no product usage allowances. Upstream quotas and request safety limits still apply.</p></section></div>
-        <div className="admin-columns"><section className="admin-section"><h2>Notes created · 7 days</h2>{d.days?.length?<ol className="admin-trend">{d.days.map(r=><li key={value(r.day)}><span>{value(r.day)}</span><meter aria-label={`Notes on ${r.day}`} min={0} max={Math.max(...d.days!.map(x=>Number(x.count)),1)} value={Number(r.count)}/><strong>{value(r.count)}</strong></li>)}</ol>:<p>No notes created in this period.</p>}</section><section className="admin-section"><h2>Recent error codes · 24 hours</h2><ul className="admin-health">{d.errors?.length?d.errors.map(r=><li key={value(r.code)}><code>{value(r.code)}</code><strong>{value(r.count)}</strong></li>):<li>No errors recorded in this period.</li>}</ul></section></div>
-        <section className="admin-section"><h2>Vertex usage</h2><div className="admin-table-wrap"><table><thead><tr><th>Project</th><th>Attempts today (UTC)</th><th>Total recorded attempts</th></tr></thead><tbody>{d.vertex?.length?d.vertex.map(r=><tr key={value(r.project)}><td>{value(r.project)}</td><td>{Number(r.day)===Math.floor(Date.now()/86400000)?value(r.daily_count):0}</td><td>{value(r.total_count)}</td></tr>):<tr><td colSpan={3}>No Vertex attempts recorded.</td></tr>}</tbody></table></div><p>{d.window} Users appear after joining the workspace; this is not the complete Supabase registration directory.</p></section>
-      </>}
+      {d&&view==='overview'&&<AdminOverview data={d} range={range} onRange={setRange} onView={navigate}/>}
       {d&&['users','jobs','events','audit'].includes(view)&&<>
         <div className="admin-toolbar"><label><Search size={17}/><span className="sr-only">Search administration</span><input value={search} onChange={e=>setSearch(e.target.value)} placeholder={view==='users'?'Find by email or account ID…':view==='jobs'?'Find by state, job or account ID…':'Find by event, code or account ID…'}/></label><button onClick={download}>Export visible page</button></div>
         {view==='users'&&<p className="admin-help">{role==='superuser'?'Only you can appoint admins or suspend accounts. Superuser accounts are protected.':'Only a superuser can change roles or suspend accounts.'} Email addresses appear after the user next accesses the app.</p>}
@@ -60,7 +57,7 @@ export default function AdminDashboard({role,owner}:{role:Role;owner:string}) {
           <thead><tr>{(view==='users'?['Account','Role','Status','Notes','Last active','Action']:view==='jobs'?['Task / account','State','Progress','Error','Updated','Action']:view==='events'?['Time','Event','Code / status','Account','Resource']:['Time','Actor','Action / target','Change','Reason']).map(h=><th key={h}>{h}</th>)}</tr></thead>
           <tbody>{rows.map(r=><tr key={value(r.id||r.owner)}>
             {view==='users'?<><td><strong>{value(r.email||'Email not recorded yet')}</strong><code>{value(r.owner)}</code></td><td><span className={`admin-role role-${r.role}`}>{value(r.role)}</span></td><td>{r.suspended?'Suspended':'Active'}</td><td>{value(r.notes)}</td><td>{date(r.last_seen)}</td><td>{role==='superuser'&&r.role!=='superuser'?<button onClick={()=>edit(r,'access')}>Manage access</button>:<span className="admin-muted">{r.role==='superuser'?'Protected':'View only'}</span>}</td></>:
-            view==='jobs'?<><td><code>{value(r.id)}</code><small>{value(r.owner)}</small></td><td><span className="admin-role">{value(r.state)}</span></td><td>{value(r.completed_parts)} / {value(r.total_parts)}</td><td><code>{value(r.error_code)}</code></td><td>{date(r.updated_at)}</td><td>{['failed','cancelled'].includes(String(r.state))?<button onClick={()=>edit(r,'retry')} disabled={Number(r.lease_until)>Date.now()}>Retry task</button>:['queued','retry','running'].includes(String(r.state))?<button onClick={()=>edit(r,'cancel')}>Cancel task</button>:<span className="admin-muted">Complete</span>}</td></>:
+            view==='jobs'?<><td><code>{value(r.id)}</code><small>{value(r.owner)}</small></td><td><span className={`admin-role state-${r.state}`}>{value(r.state)}</span></td><td><progress aria-label="Completed summary parts" value={Number(r.completed_parts||0)} max={Math.max(1,Number(r.total_parts||0))}/><small>{value(r.completed_parts)} / {value(r.total_parts)} parts</small></td><td><code>{value(r.error_code)}</code></td><td>{date(r.updated_at)}</td><td>{['failed','cancelled'].includes(String(r.state))?<button onClick={()=>edit(r,'retry')} disabled={Number(r.lease_until)>Date.now()}>Retry task</button>:['queued','retry','running'].includes(String(r.state))?<button onClick={()=>edit(r,'cancel')}>Cancel task</button>:<span className="admin-muted">Complete</span>}</td></>:
             view==='events'?<><td>{date(r.created_at)}</td><td>{value(r.event)}</td><td>{value(r.code)} {value(r.status)}</td><td><code>{value(r.actor)}</code></td><td><code>{value(r.resource)}</code></td></>:
             <><td>{date(r.created_at)}</td><td><code>{value(r.actor)}</code></td><td><strong>{value(r.action)}</strong><code>{value(r.target)}</code></td><td><details><summary>View change</summary><p>Before: {value(r.before_value)}</p><p>After: {value(r.after_value)}</p></details></td><td>{value(r.reason)}</td></>}
           </tr>)}{!rows.length&&<tr><td colSpan={6} className="admin-empty">{query?'No matches. Try another search.':'No records to show yet.'}</td></tr>}</tbody></table></div>

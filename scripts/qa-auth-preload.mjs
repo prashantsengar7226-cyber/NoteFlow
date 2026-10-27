@@ -22,13 +22,14 @@ globalThis.fetch=async(input,init={})=>{
     return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(value)}]}}]});
   }
   if(url.origin!==new URL(process.env.NEXT_PUBLIC_SUPABASE_URL).origin) throw new Error('External network disabled in local QA');
+  if(url.pathname.endsWith('/settings'))return Response.json({disable_signup:false,mailer_autoconfirm:false,external:{email:true}});
   if(url.pathname.endsWith('/logout')) return new Response(null,{status:204});
   if(url.pathname.endsWith('/user')) {
     try {
       const token=new Headers(init.headers??input.headers).get('authorization').replace(/^Bearer /,'');
       const payload=JSON.parse(Buffer.from(token.split('.')[1],'base64url').toString());
       if(!users.includes(payload.sub) || payload.exp <= Date.now()/1000 || !token.endsWith('.local-qa-signature')) throw new Error('Invalid fixture');
-      return Response.json({id:payload.sub,email:`audit-${users.indexOf(payload.sub)}@example.invalid`,aud:'authenticated',app_metadata:{provider:'email'},user_metadata:{},created_at:'2026-01-01T00:00:00Z'});
+      return Response.json({id:payload.sub,email:`audit-${users.indexOf(payload.sub)}@example.invalid`,email_confirmed_at:'2026-01-01T00:00:00Z',aud:'authenticated',app_metadata:{provider:'email'},user_metadata:{},created_at:'2026-01-01T00:00:00Z'});
     } catch { return Response.json({message:'Invalid fixture token'},{status:401}); }
   }
   return Response.json({message:'Only fixture identity verification is supported'},{status:400});

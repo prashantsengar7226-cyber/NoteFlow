@@ -9,6 +9,7 @@ import {randomBytes} from 'node:crypto';
 import nextEnv from '@next/env';
 import { checkPublicDesign } from './design-qa.mjs';
 import { checkAdministration } from './admin-qa.mjs';
+import { checkAuthForms } from './auth-ui-qa.mjs';
 nextEnv.loadEnvConfig(process.cwd());
 await mkdir('audit',{recursive:true});
 const dbPath=path.resolve('audit',`workspace-qa-${Date.now()}.db`);
@@ -35,6 +36,7 @@ try {
   for(let i=0;i<40;i++) {try {const r=await fetch(base+'/login');if(r.ok)break;}catch{} await new Promise(r=>setTimeout(r,250));}
   browser=await chromium.launch({channel:'msedge',headless:true});
   await checkPublicDesign(browser,base,results);
+  await checkAuthForms(browser,base,results);
   const sessions=[];
   for(let index=0;index<2;index++) {
     const context=await browser.newContext({viewport:{width:1440,height:1000},serviceWorkers:'block',reducedMotion:'reduce'});
@@ -42,7 +44,7 @@ try {
     const id=`00000000-0000-4000-8000-00000000000${index+1}`;
     const enc=x=>Buffer.from(JSON.stringify(x)).toString('base64url');
     const token=enc({alg:'HS256',typ:'JWT'})+'.'+enc({sub:id,exp:Math.floor(Date.now()/1000)+3600,iat:Math.floor(Date.now()/1000)})+'.local-qa-signature';
-    await page.route('https://**.supabase.co/**',route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({access_token:token,refresh_token:'local-fixture-refresh',token_type:'bearer',expires_in:3600,user:{id,email:`audit-${index}@example.invalid`,app_metadata:{},user_metadata:{},aud:'authenticated',created_at:'2026-01-01T00:00:00Z'}})}));
+    await page.route('https://**.supabase.co/**',route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({access_token:token,refresh_token:'local-fixture-refresh',token_type:'bearer',expires_in:3600,user:{id,email:`audit-${index}@example.invalid`,app_metadata:{},user_metadata:{},email_confirmed_at:'2026-01-01T00:00:00Z',aud:'authenticated',created_at:'2026-01-01T00:00:00Z'}})}));
     await page.goto(base+'/login');
     await page.getByLabel('Email address').fill(`audit-${index}@example.invalid`);
     await page.getByLabel('Password',{exact:true}).fill('Synthetic-Password-42!');

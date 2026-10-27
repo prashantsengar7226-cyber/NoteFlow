@@ -13,7 +13,7 @@ export async function getChatGPTUser(): Promise<ChatGPTUser | null> {
   try { result = await client.auth.getUser(); }
   catch { return null; }
   const { data: { user }, error } = result;
-  if (error || !user?.id || !user.email || user.is_anonymous) return null;
+  if (error || !user?.id || !user.email || user.is_anonymous || !user.email_confirmed_at) return null;
   const name = typeof user.user_metadata?.full_name === 'string' ? user.user_metadata.full_name : null;
   return { userId: user.id, email: user.email, displayName: name || user.email, fullName: name };
 }

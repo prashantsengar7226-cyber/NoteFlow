@@ -13,9 +13,9 @@ export async function proxy(request: NextRequest) {
         values.forEach(({ name, value, options }) => response.cookies.set(name, value, options));
       },
     } });
-    await client.auth.getUser();
+    try { await client.auth.getUser(); } catch { /* Protected routes verify identity and fail closed. */ }
   }
   response.headers.set('Cache-Control', 'private, no-store');
   return response;
 }
-export const config = { matcher: ['/', '/login', '/api/:path*', '/auth/:path*'] };
+export const config = { matcher: ['/', '/login', '/admin/:path*', '/api/:path*', '/auth/:path*'] };

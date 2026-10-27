@@ -9,6 +9,11 @@ export async function checkAdministration(a,b,base,dbUrl,results) {
   await a.goto(base+'/');await a.getByRole('link',{name:'Superuser dashboard'}).click();
   await a.getByRole('heading',{name:'Overview',exact:true}).waitFor();
   await a.getByRole('heading',{name:'Service connections'}).waitFor();
+  await a.getByRole('img',{name:/Notes created over 7 days/}).waitFor();
+  await a.getByLabel('Activity period').selectOption('30');
+  await a.getByRole('img',{name:/Notes created over 30 days/}).waitFor();
+  await a.getByLabel('Activity period').selectOption('7');
+  await a.getByRole('img',{name:/Notes created over 7 days/}).waitFor();
   await a.screenshot({path:'audit/admin-overview-desktop.png',fullPage:true});
   await b.goto(base+'/admin');await b.getByRole('heading',{name:'Administrator access required'}).waitFor();
   assert.equal(await b.evaluate(async()=> (await fetch('/api/admin')).status),403);

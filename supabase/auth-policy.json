@@ -1,0 +1,7 @@
+﻿{
+  "site_url": "https://note-flow-blue.vercel.app",
+  "mailer_autoconfirm": false,
+  "password_min_length": 12,
+  "mailer_otp_exp": 3600,
+  "mailer_secure_email_change_enabled": true
+}
