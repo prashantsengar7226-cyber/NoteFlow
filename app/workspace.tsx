@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import { api, recoverableImport } from '@/lib/api-client';
 import { summarySourceChunks } from '@/lib/study';
+import { findStudyTool, SOURCE_HANDOFF } from '@/lib/study-tools';
 import {
   ArrowUpRight,
   ArrowRight,
@@ -283,6 +284,27 @@ export default function Workspace({ name }: { name: string }) {
     modalTitle = useRef<HTMLInputElement>(null);
   const importRequests = useRef(new Map<string, string>());
   const importRunning = useRef(false);
+  const handoffHandled = useRef(false);
+  useEffect(() => {
+    if (handoffHandled.current) return;
+    handoffHandled.current = true;
+    const tool = findStudyTool(new URLSearchParams(window.location.search).get('start'));
+    if (!tool) return;
+    let kind: string = tool.source;
+    let text = '';
+    try {
+      const raw = sessionStorage.getItem(SOURCE_HANDOFF);
+      sessionStorage.removeItem(SOURCE_HANDOFF);
+      const saved = raw ? JSON.parse(raw) : null;
+      if (saved && ['youtube', 'document', 'text'].includes(saved.source) && typeof saved.createdAt === 'number' && Date.now() - saved.createdAt >= 0 && Date.now() - saved.createdAt < 15 * 60 * 1000) {
+        kind = saved.source;
+        text = typeof saved.text === 'string' ? saved.text.slice(0, 100000) : '';
+      }
+    } catch { /* A new source can always be entered in the importer. */ }
+    openImport(kind);
+    setSource(text);
+    window.history.replaceState(null, '', '/');
+  }, []);
   useEffect(() => {
     const query = window.matchMedia('(max-width: 760px)');
     const update = () => {
@@ -1052,7 +1074,7 @@ export default function Workspace({ name }: { name: string }) {
             <p>
               {status?.billing?.launch === false
                 ? 'Your account. Your learning tools.'
-                : 'All available tools, included.'}
+                : 'Your notes and study tools, together.'}
             </p>
             <div className="sidebar-usage-label">
               <span>{status?.featureRouting ? 'AI access' : 'AI operations today'}</span>
@@ -2398,7 +2420,7 @@ export default function Workspace({ name }: { name: string }) {
                         <Plus size={20} />
                       </span>
                       <div>
-                        <h2>Create something worth keeping</h2>
+                        <h2>What are we studying today?</h2>
                         <p>Start with a video, document, or text.</p>
                       </div>
                     </div>
@@ -2534,7 +2556,7 @@ export default function Workspace({ name }: { name: string }) {
                     <p>
                       {status?.billing?.launch === false
                         ? 'Manage your access, daily allowances, and one-time purchases.'
-                        : 'All available features are open during launch. No card required.'}
+                        : 'Free study tools, with provider limits. Vertex access is reserved for admins.'}
                     </p>
                     <div className="access-tools">
                       <span>

@@ -88,7 +88,7 @@ export function InstallApp() {
         <Smartphone size={20} /> Noteflow on your home screen
       </h2>
       <p>
-        Open your study library in its own app window. Use the same ChatGPT account to access your
+        Open your study library in its own app window. Use the same NoteFlow account to access your
         notes across devices.
       </p>
       {state.installed ? (

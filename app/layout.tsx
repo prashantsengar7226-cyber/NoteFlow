@@ -4,6 +4,7 @@ import './globals.css';
 import './premium.css';
 import './product.css';
 import './study-workspace.css';
+import './noteflow-design.css';
 export const metadata: Metadata = {
   title: 'Noteflow — Video to knowledge',
   description: 'Turn videos, lectures and documents into a personal knowledge library.',

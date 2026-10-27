@@ -7,6 +7,7 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import {randomBytes} from 'node:crypto';
 import nextEnv from '@next/env';
+import { checkPublicDesign } from './design-qa.mjs';
 nextEnv.loadEnvConfig(process.cwd());
 await mkdir('audit',{recursive:true});
 const dbPath=path.resolve('audit',`workspace-qa-${Date.now()}.db`);
@@ -30,6 +31,7 @@ let browser;
 try {
   for(let i=0;i<40;i++) {try {const r=await fetch(base+'/login');if(r.ok)break;}catch{} await new Promise(r=>setTimeout(r,250));}
   browser=await chromium.launch({channel:'msedge',headless:true});
+  await checkPublicDesign(browser,base,results);
   const sessions=[];
   for(let index=0;index<2;index++) {
     const context=await browser.newContext({viewport:{width:1440,height:1000},serviceWorkers:'block',reducedMotion:'reduce'});
@@ -48,6 +50,25 @@ try {
   }
   results.push({check:'two synthetic accounts reach real workspace via fixture auth',pass:true});
   const [a,b]=sessions;
+  // Preserve draft only in this tab and consume it once after authenticated entry.
+  await a.page.goto(base+'/welcome');
+  await a.page.getByRole('tab',{name:'Paste text',exact:true}).click();
+  await a.page.getByLabel('Text or transcript',{exact:true}).fill('Authenticated draft handoff fixture.');
+  await a.page.getByRole('button',{name:'Create study notes',exact:true}).click();
+  await a.page.waitForURL(base+'/login?tool=text');
+  await a.page.getByLabel('Email address').fill('audit-0@example.invalid');
+  await a.page.getByLabel('Password',{exact:true}).fill('Synthetic-Password-42!');
+  await a.page.getByRole('button',{name:'Sign in',exact:true}).click();
+  await a.page.locator('[aria-labelledby="import-title"]').waitFor();
+  assert.equal(await a.page.locator('[aria-labelledby="import-title"] textarea').inputValue(),'Authenticated draft handoff fixture.');
+  assert.equal(await a.page.evaluate(()=>sessionStorage.getItem('noteflow.source-handoff.v1')),null);
+  await a.page.goto(base+'/');
+  await a.page.screenshot({path:'audit/design-workspace-1440.png',fullPage:true});
+  await a.page.setViewportSize({width:390,height:844});
+  await a.page.screenshot({path:'audit/design-workspace-390.png',fullPage:true});
+  assert.equal(await a.page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  await a.page.setViewportSize({width:1440,height:1000});
+  results.push({check:'authenticated handoff fills importer once, clears storage and workspace fits mobile',pass:true});
   await a.page.locator('.settings-nav').click();
   await a.page.getByRole('heading',{name:'Choose your AI connection'}).waitFor();
   await a.page.getByLabel('API key',{exact:true}).fill('synthetic-browser-key-for-local-qa');
