@@ -1,10 +1,14 @@
 import { env } from './platform';
 import { aiContext, usesPersonalAI } from './ai-context';
 import { AppError } from './core';
+import { activeAccess, elevated } from './access';
 
 const vars = () => env as unknown as Record<string, string | undefined>;
 export const featureRouting = () => vars().AI_FEATURE_ROUTING === 'true';
-export const isAIAdmin = (owner: string) => (vars().AI_ADMIN_USER_IDS || '').split(',').map(s => s.trim()).filter(s => /^[a-f0-9-]{36}$/i.test(s)).includes(owner);
+export const isAIAdmin = (owner: string) => {
+  const scope=aiContext.getStore();
+  return scope?.owner===owner && !!scope.role && elevated(scope.role);
+};
 export const premiumFeature = (feature?: string) => feature === 'summary' || feature === 'insights';
 export const usesVertex = () => {
   const scope = aiContext.getStore();
@@ -30,11 +34,10 @@ export async function weeklyUsage(owner: string) {
 }
 // One durable reservation per logical run, including all its chunks and retries.
 export async function reserveOperation(owner: string, id: string, feature: string) {
-  if (!featureRouting() || !isAIAdmin(owner) || !premiumFeature(feature) || usesPersonalAI(owner)) return;
+  if (!featureRouting() || !elevated((await activeAccess(owner)).role) || !premiumFeature(feature) || usesPersonalAI(owner)) return;
   await releaseStoppedOperations(owner);
   const { start } = weekWindow();
-  // Admin runs are tracked for audit, not capped by a user allowance. Global
-  // Vertex attempt caps still apply at the paid provider boundary.
+  // Admin runs are tracked for audit, not capped by a product allowance.
   await env.DB.prepare(`INSERT INTO ai_operations(owner,id,feature,week,state,created_at)
     VALUES(?,?,?,?,'reserved',?)
     ON CONFLICT(owner,id) DO UPDATE SET state='reserved',week=excluded.week WHERE ai_operations.state='released'`)

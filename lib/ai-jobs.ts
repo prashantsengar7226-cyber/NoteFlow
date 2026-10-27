@@ -8,6 +8,8 @@ import { credential, withOwnerAI, withAILease } from './personal-ai';
 import { summaryStep } from './summary-progress';
 import { aiContext } from './ai-context';
 import { withAIFeature, settleOperation } from './ai-policy';
+import { activeAccess, elevated } from './access';
+import { recordEvent } from './operations';
 
 export const jobInput = z.object({
   id: z.string().uuid(),
@@ -39,6 +41,7 @@ export const publicJob = (job: AIJob) => ({
   errorCode: job.error_code, background: schedulerConfigured(),
 });
 export async function enqueueSummary(owner: string, input: z.infer<typeof jobInput>) {
+  const uncapped=elevated((await activeAccess(owner)).role);
   const note = await ownedNote(input.id, owner);
   if (note.status !== 'ready') throw new AppError(409, 'NOT_READY', 'Wait for the transcript to finish.');
   const existing = await db().prepare(`SELECT * FROM ai_jobs WHERE owner=? AND note_id=? AND state IN ${active}`).bind(owner, note.id).first<AIJob>();
@@ -49,15 +52,16 @@ export async function enqueueSummary(owner: string, input: z.infer<typeof jobInp
     return { ...existing, note_title: note.title };
   }
   const pending = await db().prepare(`SELECT COUNT(*) AS count FROM ai_jobs WHERE owner=? AND state IN ${active}`).bind(owner).first<{count:number}>();
-  if ((pending?.count ?? 0) >= 10) throw new AppError(429, 'QUEUE_FULL', 'Finish or cancel a queued summary before adding another.');
+  if (!uncapped && (pending?.count ?? 0) >= 10) throw new AppError(429, 'QUEUE_FULL', 'Finish or cancel a queued summary before adding another.');
   const connection = await credential(owner);
   const now = Date.now();
   // INSERT OR IGNORE plus the partial unique index makes enqueue replay-safe.
-  await db().prepare(`INSERT OR IGNORE INTO ai_jobs(id,owner,note_id,language,detail,credential_revision,next_at,created_at,updated_at) SELECT ?,?,?,?,?,?,?,?,? WHERE (SELECT COUNT(*) FROM ai_jobs WHERE owner=? AND state IN ${active})<10`)
-    .bind(crypto.randomUUID(), owner, note.id, input.language, input.detail, connection?.revision ?? 'shared', now, now, now, owner).run();
+  await db().prepare(`INSERT OR IGNORE INTO ai_jobs(id,owner,note_id,language,detail,credential_revision,next_at,created_at,updated_at) SELECT ?,?,?,?,?,?,?,?,? WHERE ?=1 OR (SELECT COUNT(*) FROM ai_jobs WHERE owner=? AND state IN ${active})<10`)
+    .bind(crypto.randomUUID(), owner, note.id, input.language, input.detail, connection?.revision ?? 'shared', now, now, now, uncapped?1:0, owner).run();
   const saved = await db().prepare(`SELECT * FROM ai_jobs WHERE owner=? AND note_id=? AND state IN ${active}`).bind(owner, note.id).first<AIJob>();
   if (!saved) throw new AppError(429,'QUEUE_FULL','Your queue is full. Finish or cancel a task first.');
   await saveSourceNotes(saved, undefined, 'AI_PENDING');
+  await recordEvent('job.queued',{actor:owner,resource:saved.id});
   return { ...saved, note_title: note.title };
 }
 export async function findJob(owner: string, id: string) {
@@ -106,8 +110,9 @@ export async function runNextJob(owner?: string, id?: string) {
   // An expired running lease means the previous process died before settling.
   if (job.state === 'running') job.failures++;
   const update = async (state: string, error: string | null, nextAt: number, failures: number, runId = job.run_id, completed = job.completed_parts, total = job.total_parts) => {
-    await db().prepare("UPDATE ai_jobs SET state=?,error_code=?,next_at=?,failures=?,lease_until=0,lease_token=NULL,run_id=?,completed_parts=?,total_parts=?,updated_at=? WHERE id=? AND lease_token=? AND state='running'")
-      .bind(state,error,nextAt,failures,runId,completed,total,Date.now(),job.id,token).run();
+    const changed=await db().prepare("UPDATE ai_jobs SET state=?,error_code=?,next_at=?,failures=?,lease_until=0,lease_token=NULL,run_id=?,completed_parts=?,total_parts=?,updated_at=? WHERE id=? AND lease_token=? AND state='running' RETURNING id")
+      .bind(state,error,nextAt,failures,runId,completed,total,Date.now(),job.id,token).first();
+    if(changed)await recordEvent('job.'+state,{actor:job.owner,resource:job.id,code:error??undefined});
   };
   try {
     if (job.failures >= 3) throw new AppError(409,'JOB_INTERRUPTED','Repeated worker interruptions. Resume explicitly to continue.');

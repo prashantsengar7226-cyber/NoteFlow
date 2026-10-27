@@ -3,6 +3,8 @@ import { aiContext, usesPersonalAI } from './ai-context';
 import { featureRouting, usesVertex } from './ai-policy';
 import { vertexConfig, vertexGenerate } from './vertex';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
+import { activeAccess, elevated, rememberUser } from './access';
+import { recordEvent } from './operations';
 import {
   AppError,
   type Segment,
@@ -108,6 +110,10 @@ export async function guard(request: Request, write = false) {
     if (request.headers.get('sec-fetch-site') === 'cross-site')
       throw new AppError(403, 'ORIGIN', 'Cross-site requests are not allowed.');
   }
+  await activeAccess(user.userId);
+  await rememberUser(user);
+  if(write && !new URL(request.url).pathname.startsWith('/api/admin'))
+    await recordEvent('request.accepted',{actor:user.userId,resource:new URL(request.url).pathname});
   return user.userId;
 }
 export const DAILY_LIMITS = FREE_PLAN.daily;
@@ -124,7 +130,9 @@ export async function account(owner: string) {
     .prepare("SELECT id FROM billing_orders WHERE owner=? AND key_mode=? AND state='paid' LIMIT 1")
     .bind(owner, mode)
     .first();
-  return effectivePlan(!!paid, vars.MONETIZATION_MODE === 'one_time');
+  const administrator=elevated((await activeAccess(owner)).role);
+  const plan=effectivePlan(!!paid, vars.MONETIZATION_MODE === 'one_time');
+  return { ...plan, ...(administrator?{name:'Administrator',access:'full'}:{}), unlimited:administrator };
 }
 const SHARED_DAILY_LIMITS = { ai: 100, youtube: 20, audio: 0 } as const;
 type ServiceKind = keyof typeof DAILY_LIMITS;
@@ -156,6 +164,7 @@ export async function consumeService(owner: string, service: ServiceKind, units 
     throw new AppError(400, 'INVALID_UNITS', 'Invalid generation size.');
   const day = Math.floor(Date.now() / 86400000);
   const plan = await account(owner);
+  if(plan.unlimited) return async () => {};
   if (plan.access === 'basic')
     throw new AppError(
       403,
@@ -266,7 +275,8 @@ export async function boundedBody(request: Request, max: number) {
   }
   return result;
 }
-export function handleError(e: unknown) {
+export async function handleError(e: unknown) {
+  await recordEvent('request.failed',{code:e instanceof AppError?e.code:e instanceof z.ZodError?'VALIDATION':'INTERNAL',status:e instanceof AppError?e.status:500});
   if (e instanceof AppError) {
     const response = json(
       {
@@ -351,6 +361,7 @@ export function publicNote(n: NoteRow) {
   };
 }
 export async function capacity(owner: string) {
+  if(elevated((await activeAccess(owner)).role)) return;
   const row = await db()
     .prepare('SELECT count(*) AS count FROM notes WHERE owner=?')
     .bind(owner)

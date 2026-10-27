@@ -7,9 +7,11 @@ import { publicBilling } from '@/lib/billing';
 import { personalAIStatus, withOwnerAI } from '@/lib/personal-ai';
 import { featureRouting, weeklyUsage, isAIAdmin } from '@/lib/ai-policy';
 import { vertexReady, vertexConfig } from '@/lib/vertex';
+import { activeAccess, elevated } from '@/lib/access';
 export async function GET(r: Request) {
   try {
     const owner = await guard(r);
+    const access = await activeAccess(owner);
     return await withOwnerAI(owner, async () => {
     const c = config();
     const connection = await personalAIStatus(owner);
@@ -17,6 +19,8 @@ export async function GET(r: Request) {
     const vertex = featureRouting() && isAIAdmin(owner) && vertexReady();
     return json({
       accountId: owner,
+      role: access.role,
+      unlimited: elevated(access.role),
       summaryConnection: connection.mode === 'personal' ? { provider: 'Personal AI', model: c.model }
         : vertex ? { provider: 'Vertex AI · admin', model: vertexConfig().model } : { provider: 'Free AI', model: c.model },
       ai: !!c.aiKey || vertex,
@@ -34,7 +38,7 @@ export async function GET(r: Request) {
       access: plan.access,
       billing: publicBilling(),
       limits: plan.limits,
-      dailyLimits: { ...plan.daily, ai: featureRouting() || connection.mode === 'personal' ? null : plan.daily.ai },
+      dailyLimits: { ...plan.daily, youtube:plan.unlimited?null:plan.daily.youtube, ai: plan.unlimited || featureRouting() || connection.mode === 'personal' ? null : plan.daily.ai },
       usage: await usage(owner),
       resetAt: nextReset(),
       version: '0.6.0',

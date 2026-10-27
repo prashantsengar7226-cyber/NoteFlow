@@ -112,6 +112,8 @@ type Artifacts = {
 };
 type Message = { role: string; answer: string; segmentIds?: number[] };
 type Status = {
+  role?: 'user' | 'admin' | 'superuser';
+  unlimited?: boolean;
   accountId?: string;
   summaryConnection?: {provider:string;model:string};
   ai: boolean;
@@ -122,7 +124,7 @@ type Status = {
   model: string | null;
   fallbackModel: string | null;
   limits: { characters: number; batch: number; uploadMB: number; notes: number };
-  dailyLimits: { ai: number | null; youtube: number };
+  dailyLimits: { ai: number | null; youtube: number | null };
   featureRouting?: boolean;
   vertex?: boolean;
   weeklyAI?: { used:number; limit:number|null; resetAt:number } | null;
@@ -1063,6 +1065,7 @@ export default function Workspace({ name }: { name: string }) {
           {!folders.length && <p className="nav-hint">Your collections will appear here.</p>}
         </nav>
         <div className="sidebar-bottom">
+          {(status?.role==='admin'||status?.role==='superuser')&&<a className="settings-nav" href="/admin"><ShieldCheck size={17}/>{status.role==='superuser'?'Superuser dashboard':'Admin dashboard'}</a>}
           <div className="sidebar-plan-card">
             <div>
               <span className="sidebar-plan-icon">
@@ -1324,10 +1327,10 @@ export default function Workspace({ name }: { name: string }) {
               <h2>{status?.featureRouting ? 'Your usage allowances' : 'Your daily allowance'}</h2>
               <p>
                 {status?.connection?.mode === 'personal' ? 'Personal AI: no NoteFlow daily cap' : status?.featureRouting ? (status.vertex ? 'Admin: Vertex summaries and insights' : 'Free AI revision guides and study tools') : `${status?.usage.ai ?? 0} of ${status?.dailyLimits.ai ?? 20} NoteFlow AI operations used`} ·{' '}
-                {status?.usage.youtube ?? 0} of {status?.dailyLimits.youtube ?? 3} YouTube imports
+                {status?.unlimited ? 'YouTube imports: no product cap' : `${status?.usage.youtube ?? 0} of ${status?.dailyLimits.youtube ?? 3} YouTube imports`}
                 used.
               </p>
-              {status?.featureRouting ? <p>No NoteFlow daily AI cap. Free providers still have shared quotas and may be unavailable; saved work resumes through the queue. Paid Vertex summaries and insights are restricted to administrators and retain site spending limits. Personal connections use your provider account. YouTube imports reset daily. Source notes and PDF utilities need no AI calls.</p> : <p>
+              {status?.featureRouting ? <p>No NoteFlow daily AI cap. Free providers still have shared quotas and may be unavailable; saved work resumes through the queue. Paid Vertex summaries and insights are restricted to administrators. Provider quotas and credit expiry still apply. Personal connections use your provider account. Non-admin YouTube import allowances reset daily. Source notes and PDF utilities need no AI calls.</p> : <p>
                 {status?.resetAt
                   ? `Next reset: ${new Date(status.resetAt).toLocaleString()}. `
                   : 'Resets at midnight UTC. '}

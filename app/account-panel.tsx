@@ -17,11 +17,14 @@ import {
 import { FEATURE_LIST, FREE_PLAN } from '@/lib/plans';
 
 type AccountData = {
+  accountId?: string;
+  role?: 'user'|'admin'|'superuser';
   featureRouting?: boolean;
   weeklyAI?: {used:number;limit:number|null;resetAt:number}|null;
   profile: { name: string; email: string; joinedAt: number };
   plan: {
     id: string;
+    unlimited?: boolean;
     name: string;
     access: string;
     daily: { ai: number; youtube: number };
@@ -299,6 +302,9 @@ export function AccountPanel({
                 <div>
                   <h2>{data.profile.name}</h2>
                   <p>{data.profile.email}</p>
+                  <p>Role: <strong>{data.role || 'user'}</strong></p>
+                  <small>Account ID: {data.accountId}</small>
+                  {(data.role==='admin'||data.role==='superuser')&&<p><a href="/admin">Open administration dashboard</a></p>}
                   <small>
                     Member since{' '}
                     {new Date(data.profile.joinedAt).toLocaleDateString(undefined, {
@@ -354,9 +360,8 @@ export function AccountPanel({
                     ))}
                   </ul>
                   <p className="price-footnote">
-                    {data.featureRouting ? '20 summaries and insights per week; small AI tools have no daily cap. ' : `${data.billing.launch ? FREE_PLAN.daily.ai : 0} AI operations per day. `}
-                    {data.billing.launch ? FREE_PLAN.daily.youtube : 0} YouTube imports per day
-                    {data.billing.launch ? ' during launch' : ''}. Shared service limits also apply.
+                    {data.plan.unlimited ? 'Administrator access has no product operation cap. ' : data.featureRouting ? 'AI study tools have no daily product cap. ' : `${data.billing.launch ? FREE_PLAN.daily.ai : 0} AI operations per day. `}
+                    {data.plan.unlimited ? 'YouTube imports have no product cap. ' : `${data.billing.launch ? FREE_PLAN.daily.youtube : 0} YouTube imports per day${data.billing.launch ? ' during launch' : ''}. `}Provider quotas and safety limits still apply.
                   </p>
                 </section>
                 <section className="price-card future-plan">
@@ -399,7 +404,7 @@ export function AccountPanel({
                     </li>
                     <li>
                       <Check size={15} />
-                      {data.featureRouting ? '20 summaries and insights weekly; small AI tools without a daily cap' : `${FREE_PLAN.daily.ai} AI operations daily`} + {FREE_PLAN.daily.youtube} YouTube imports daily
+                      {data.plan.unlimited ? 'Administrator access without product allowances' : data.featureRouting ? `AI tools without a daily product cap; ${FREE_PLAN.daily.youtube} YouTube imports daily` : `${FREE_PLAN.daily.ai} AI operations and ${FREE_PLAN.daily.youtube} YouTube imports daily`}
                     </li>
                   </ul>
                   <button
@@ -446,19 +451,19 @@ export function AccountPanel({
                     label: data.featureRouting ? 'Summaries & insights this week' : 'AI operations',
                     icon: Sparkles,
                     used: data.featureRouting ? data.weeklyAI?.used ?? 0 : data.usage.ai,
-                    max: data.featureRouting ? data.weeklyAI?.limit ?? null : data.plan.daily.ai,
+                    max: data.plan.unlimited ? null : data.featureRouting ? data.weeklyAI?.limit ?? null : data.plan.daily.ai,
                   },
                   {
                     label: 'YouTube imports',
                     icon: Zap,
                     used: data.usage.youtube,
-                    max: data.plan.daily.youtube,
+                    max: data.plan.unlimited ? null : data.plan.daily.youtube,
                   },
                   {
                     label: 'Saved notes',
                     icon: FileText,
                     used: data.stats.notes,
-                    max: data.plan.limits.notes,
+                    max: data.plan.unlimited ? null : data.plan.limits.notes,
                   },
                 ].map((item) => (
                   <div className="usage-card" key={item.label}>
@@ -468,7 +473,7 @@ export function AccountPanel({
                     </span>
                     <strong>
                       {item.used.toLocaleString()}
-                      <small>{item.max === null ? ' · admin, no user cap' : `/ ${item.max.toLocaleString()}`}</small>
+                      <small>{item.max === null ? ' · no product cap' : `/ ${item.max.toLocaleString()}`}</small>
                     </strong>
                     {item.max !== null && <progress
                       max={Math.max(item.max, 1)}

@@ -8,11 +8,14 @@ import assert from 'node:assert/strict';
 import {randomBytes} from 'node:crypto';
 import nextEnv from '@next/env';
 import { checkPublicDesign } from './design-qa.mjs';
+import { checkAdministration } from './admin-qa.mjs';
 nextEnv.loadEnvConfig(process.cwd());
 await mkdir('audit',{recursive:true});
 const dbPath=path.resolve('audit',`workspace-qa-${Date.now()}.db`);
 const dbUrl='file:'+dbPath.replaceAll('\\','/');
 const client=createClient({url:dbUrl});
+await client.execute('PRAGMA journal_mode=WAL');
+await client.execute('PRAGMA busy_timeout=5000');
 for(const name of (await readdir('drizzle')).filter(x=>x.endsWith('.sql')).sort()) {
   const sql=await readFile('drizzle/'+name,'utf8');
   await client.batch(sql.split('--> statement-breakpoint').map(x=>x.trim()).filter(Boolean),'write');
@@ -149,6 +152,7 @@ try {
   await a.page.locator('.source-excerpts summary').click();
   assert.ok((await a.page.locator('.source-excerpts .takeaways').innerText()).includes('The square is blue.'));
   const partialDb=createClient({url:dbUrl});
+  await partialDb.execute('PRAGMA busy_timeout=5000');
   const checked={title:'Checked result',overview:'Checked AI fixture.',keyPoints:[{text:'The square is blue.',segmentIds:[0]}],chapters:[],model:'fixture',sourceChecked:true};
   await partialDb.execute({sql:'INSERT INTO artifacts(note_id,kind,content,created_at) VALUES(?,?,?,?) ON CONFLICT(note_id,kind) DO UPDATE SET content=excluded.content',args:[fallbackId,'__summary_progress',JSON.stringify({runId:crypto.randomUUID(),language:'Hindi',detail:'balanced',parts:[checked],totalParts:2,chunkVersion:3,lockUntil:0}),Date.now()]});
   partialDb.close();
@@ -198,6 +202,7 @@ try {
   assert.equal(await a.page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
   results.push({check:'stored HTML title is rendered as text; desktop/mobile workspace has no horizontal overflow',pass:true});
   const fixtureDb=createClient({url:dbUrl});
+  await fixtureDb.execute('PRAGMA busy_timeout=5000');
   const part={title:'Saved part',overview:'Spaced practice improves recall.',keyPoints:[{text:'Practice over time.',segmentIds:[0]}],chapters:[]};
   await fixtureDb.execute({sql:'INSERT INTO artifacts(note_id,kind,content,created_at) VALUES(?,?,?,?)',args:[id,'__summary_progress',JSON.stringify({runId:'fixture-resume',language:'Hindi',detail:'balanced',parts:[part],totalParts:2,lockUntil:0,error:'This video could not be transcribed. Use a public, completed video, or paste its transcript.'}),Date.now()]});
   fixtureDb.close();
@@ -215,6 +220,7 @@ try {
     const request=route.request().postDataJSON();
     assert.equal(request.id,id);assert.equal(request.language,'Hindi');
     const resumed=createClient({url:dbUrl});
+  await resumed.execute('PRAGMA busy_timeout=5000');
     await resumed.batch([
       {sql:'UPDATE notes SET summary=? WHERE id=?',args:[JSON.stringify({...part,overview:'Completed fixture summary.',engine:'ai',language:'Hindi',models:['fixture-model']}),id]},
       {sql:"DELETE FROM artifacts WHERE note_id=? AND kind='__summary_progress'",args:[id]},
@@ -248,6 +254,7 @@ try {
   const subjects=['अंतरराष्ट्रीय संगठन और उनकी भूमिका','विज्ञान और प्रौद्योगिकी','इतिहास और संस्कृति','पर्यावरण और संरक्षण','शिक्षा और अध्ययन की विधियाँ','खेल और महत्वपूर्ण तथ्य'];
   const longSummary={engine:'ai',language:'Hindi',overview:'यह केवल स्थानीय इंटरफ़ेस परीक्षण के लिए तैयार किया गया उदाहरण है। इसमें 68 विषय और 166 मुख्य बिंदु हैं।',keyPoints:Array.from({length:166},(_,i)=>({text:`अभ्यास बिंदु ${i+1}: विषय की मुख्य जानकारी समझें, स्रोत पढ़ें और अपने शब्दों में दोहराएँ। यह परीक्षण सामग्री है।`,segmentIds:[Math.min(203,Math.floor(i/166*204))]})),chapters:Array.from({length:68},(_,i)=>({title:`${subjects[i%subjects.length]} — भाग ${i+1}`,summary:`इस भाग में ${subjects[i%subjects.length]} का अध्ययन करें। प्रमुख शब्दों और उनके संदर्भ को समझना जरूरी है। अपनी समझ की जाँच के लिए नीचे दिए गए अभ्यास बिंदु पढ़ें।`,segmentId:i*3})),models:['local-ui-fixture']};
   const longDb=createClient({url:dbUrl});
+  await longDb.execute('PRAGMA busy_timeout=5000');
   await longDb.execute({sql:'UPDATE notes SET title=?,transcript=?,summary=? WHERE id=?',args:['68 विषयों की पुनरावृत्ति · UI test',JSON.stringify(longSegments),JSON.stringify(longSummary),id]});
   longDb.close();
   await a.page.setViewportSize({width:1440,height:1000});
@@ -261,6 +268,7 @@ try {
   // Exercise the actual video iframe layout without external playback or provider requests.
   await a.page.route('https://www.youtube-nocookie.com/embed/**',route=>route.fulfill({status:200,contentType:'text/html',body:'<!doctype html><html><body style="margin:0;min-height:100vh;display:grid;place-items:center;background:#16243b;color:white;font:16px system-ui"><div>Video preview · local UI fixture</div></body></html>'}));
   const videoDb=createClient({url:dbUrl});
+  await videoDb.execute('PRAGMA busy_timeout=5000');
   await videoDb.execute({sql:'UPDATE notes SET source=?,video_id=? WHERE id=?',args:['YouTube','M7lc1UVf-VE',id]});
   videoDb.close();
   await a.page.goto(base+'/');
@@ -346,6 +354,7 @@ try {
   assert.equal(await a.page.getByRole('button',{name:'Create note',exact:true}).count(),0);
   await a.page.unroute('**/api/notes',lostConfirmation);
   results.push({check:'truncated import success recovers the saved note and generates basic summary without duplicate import',pass:true});
+  await checkAdministration(a.page,b.page,base,dbUrl,results);
   await a.page.goto(base+'/');
   await a.page.locator('form[action="/auth/signout"] button').click();
   await a.page.waitForURL(base+'/login');

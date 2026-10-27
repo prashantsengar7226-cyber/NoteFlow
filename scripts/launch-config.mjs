@@ -7,8 +7,6 @@ export function launchErrors(env) {
     try { const credential=JSON.parse(env.VERTEX_SERVICE_ACCOUNT_JSON || '{}'); if(credential.type!=='service_account' || !credential.client_email || !credential.private_key) throw new Error(); }
     catch { errors.push('Production Vertex requires a service-account credential, not a personal Google login'); }
     if(!Number.isFinite(Date.parse(env.VERTEX_CREDIT_EXPIRES_AT || '')) || Date.parse(env.VERTEX_CREDIT_EXPIRES_AT)<=Date.now()) errors.push('Set a future VERTEX_CREDIT_EXPIRES_AT before credit expiry');
-    for(const key of ['VERTEX_DAILY_REQUEST_CAP','VERTEX_TOTAL_REQUEST_CAP'])
-      if(!Number.isSafeInteger(Number(env[key])) || Number(env[key])<1) errors.push(`Set a positive ${key}`);
     if(!env.OPENROUTER_API_KEY?.trim() || !(env.OPENROUTER_MODEL==='openrouter/free' || env.OPENROUTER_MODEL?.endsWith(':free')))
       errors.push('Small features require an OpenRouter key and a free model');
     if(!(env.AI_PROVIDER_ORDER || 'gemini,groq,openrouter').split(',').map(s=>s.trim()).includes('openrouter')) errors.push('AI_PROVIDER_ORDER must include openrouter for small features');

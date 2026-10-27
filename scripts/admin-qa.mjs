@@ -1,0 +1,57 @@
+import assert from 'node:assert/strict';
+import {createClient} from '@libsql/client';
+export async function checkAdministration(a,b,base,dbUrl,results) {
+  assert.equal(base,'http://127.0.0.1:3100');assert.ok(dbUrl.startsWith('file:'));
+  const root='00000000-0000-4000-8000-000000000001',other='00000000-0000-4000-8000-000000000002';
+  const db=createClient({url:dbUrl}),now=Date.now();
+  await db.execute('PRAGMA busy_timeout=5000');
+  await db.execute({sql:"INSERT INTO user_access(owner,role,revision,updated_by,updated_at) VALUES(?,'superuser',?,'local-ui-test',?)",args:[root,crypto.randomUUID(),now]});
+  await a.goto(base+'/');await a.getByRole('link',{name:'Superuser dashboard'}).click();
+  await a.getByRole('heading',{name:'Overview',exact:true}).waitFor();
+  await a.getByRole('heading',{name:'Service connections'}).waitFor();
+  await a.screenshot({path:'audit/admin-overview-desktop.png',fullPage:true});
+  await b.goto(base+'/admin');await b.getByRole('heading',{name:'Administrator access required'}).waitFor();
+  assert.equal(await b.evaluate(async()=> (await fetch('/api/admin')).status),403);
+  await a.getByRole('button',{name:'People & roles',exact:true}).click();
+  await a.getByRole('cell',{name:'audit-1@example.invalid',exact:false}).waitFor();
+  await a.getByRole('row').filter({hasText:other}).getByRole('button',{name:'Manage access'}).click();
+  await a.getByLabel('Account role').selectOption('admin');
+  await a.getByLabel('Reason for this change').fill('Temporary local UI verification');
+  await a.screenshot({path:'audit/admin-access-dialog.png'});
+  await a.getByRole('button',{name:'Confirm change',exact:true}).click();
+  await a.getByText('Change saved and recorded in the audit history.').waitFor();
+  await b.reload();await b.getByRole('heading',{name:'Overview',exact:true}).waitFor();
+  assert.equal(await b.getByRole('button',{name:'Database',exact:true}).count(),0);
+  await b.getByRole('button',{name:'People & roles',exact:true}).click();
+  await b.getByRole('cell',{name:'audit-0@example.invalid',exact:false}).waitFor();
+  assert.equal(await b.getByRole('button',{name:'Manage access'}).count(),0);
+  await a.screenshot({path:'audit/admin-people-desktop.png',fullPage:true});
+  for(const title of ['Summary jobs','Live events','Audit history','Database']) {
+    await a.getByRole('button',{name:title,exact:true}).click();
+    await a.getByRole('heading',{name:title,exact:true}).waitFor();
+    await a.locator('.admin-table-wrap table').first().waitFor();
+    assert.equal(await a.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+    await a.screenshot({path:`audit/admin-${title.replaceAll(' ','-')}.png`,fullPage:true});
+  }
+  await a.getByRole('button',{name:'People & roles',exact:true}).click();
+  await a.getByRole('row').filter({hasText:other}).getByRole('button',{name:'Manage access'}).click();
+  await a.getByLabel('Account role').selectOption('user');
+  await a.getByLabel('Reason for this change').fill('End temporary administrator access');
+  await a.getByRole('button',{name:'Confirm change',exact:true}).click();
+  await a.getByText('Change saved and recorded in the audit history.').waitFor();
+  assert.equal(await b.evaluate(async()=> (await fetch('/api/admin')).status),403);
+  await a.setViewportSize({width:390,height:844});
+  await a.getByRole('button',{name:'Overview',exact:true}).click();
+  await a.getByRole('heading',{name:'Service connections'}).waitFor();
+  assert.equal(await a.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  await a.screenshot({path:'audit/admin-overview-mobile.png',fullPage:true});
+  await a.getByRole('button',{name:'People & roles',exact:true}).click();
+  await a.getByRole('row').filter({hasText:other}).getByRole('button',{name:'Manage access'}).click();
+  await a.getByLabel('Account role').waitFor();
+  await a.screenshot({path:'audit/admin-dialog-mobile.png'});
+  await a.keyboard.press('Escape');assert.equal(await a.locator('dialog').evaluate(el=>el.open),false);
+  assert.equal(await a.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  await a.setViewportSize({width:1440,height:1000});
+  db.close();
+  results.push({check:'administration: all six sections, superuser-only role changes, admin access, live revocation, database restriction, mobile layout and dialog dismissal pass',pass:true});
+}

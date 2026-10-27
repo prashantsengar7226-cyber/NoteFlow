@@ -3,6 +3,7 @@ import { env } from './platform';
 import { AppError } from './core';
 import { aiContext } from './ai-context';
 import type { RouterCandidate } from './provider';
+import { activeAccess } from './access';
 
 type Credential = { owner: string; provider: RouterCandidate['provider']; model: string; ciphertext: string; revision: string };
 function encryptionKey() {
@@ -38,10 +39,11 @@ export async function personalAIStatus(owner: string) {
   return { enabled: personalAIEnabled(), mode: row ? 'personal' : 'shared', provider: row?.provider, model: row?.model, revision: row?.revision };
 }
 export async function withOwnerAI<T>(owner: string, work: () => Promise<T>, revision?: string): Promise<T> {
+  const access = await activeAccess(owner);
   const row = await credential(owner);
   if (revision !== undefined && revision !== (row?.revision ?? 'shared'))
     throw new AppError(409, 'AI_CONNECTION_CHANGED', 'Your AI connection changed. Resume to use the current connection.');
-  return aiContext.run({ owner, revision: row?.revision ?? 'shared', candidate: row ? {
+  return aiContext.run({ owner, role: access.role, revision: row?.revision ?? 'shared', candidate: row ? {
     provider: row.provider, model: row.model, key: openKey(row),
   } : undefined }, work);
 }

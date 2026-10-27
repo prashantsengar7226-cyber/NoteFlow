@@ -4,6 +4,9 @@ import { env } from './platform';
 import { AppError } from './core';
 import { providerFetch, providerJson } from './provider';
 import { usesVertex } from './ai-policy';
+import { activeAccess, elevated } from './access';
+import { aiContext } from './ai-context';
+import { recordEvent } from './operations';
 
 const vars = () => env as unknown as Record<string,string | undefined>;
 const localADC = () => !vars().VERCEL && vars().VERTEX_ALLOW_LOCAL_ADC === 'true' && !!vars().VERTEX_LOCAL_ADC_PATH;
@@ -13,14 +16,11 @@ export function vertexConfig() {
   const location = v.VERTEX_LOCATION || 'global';
   const model = v.VERTEX_MODEL || '';
   const expires = Date.parse(v.VERTEX_CREDIT_EXPIRES_AT || '');
-  const daily = Number(v.VERTEX_DAILY_REQUEST_CAP || 0);
-  const total = Number(v.VERTEX_TOTAL_REQUEST_CAP || 0);
   if (v.VERTEX_ENABLED !== 'true' || !/^[a-z][a-z0-9-]{4,61}[a-z0-9]$/.test(project) ||
       !/^(global|[a-z]+-[a-z]+[0-9])$/.test(location) || !/^gemini-[a-zA-Z0-9.-]+$/.test(model) ||
-      !Number.isFinite(expires) || expires <= Date.now() || !Number.isSafeInteger(daily) || daily < 1 ||
-      !Number.isSafeInteger(total) || total < 1 || (!v.VERTEX_SERVICE_ACCOUNT_JSON && !localADC()))
+      !Number.isFinite(expires) || expires <= Date.now() || (!v.VERTEX_SERVICE_ACCOUNT_JSON && !localADC()))
     throw new AppError(503,'VERTEX_NOT_CONFIGURED','AI summaries and insights are not available yet. Basic source notes and smaller tools remain available.');
-  return { project, location, model, daily, total, expires };
+  return { project, location, model, expires };
 }
 export function vertexReady() { try { vertexConfig(); return true; } catch { return false; } }
 let cached: { fingerprint:string; token:string; expires:number } | undefined;
@@ -57,17 +57,17 @@ async function accessToken() {
 export async function vertexGenerate(payload: Record<string,unknown>, timeout: number) {
   // Check at the final paid boundary too, including jobs and internal callers.
   if (!usesVertex()) throw new AppError(403, 'VERTEX_ADMIN_ONLY', 'Paid Vertex AI is available only to an administrator.');
+  const owner=aiContext.getStore()!.owner;
+  if(!elevated((await activeAccess(owner)).role)) throw new AppError(403,'VERTEX_ADMIN_ONLY','Paid Vertex AI is available only to an administrator.');
   const c = vertexConfig();
   const token = await accessToken();
   // Every upstream attempt (including failed generations and reviews) counts.
-  // This circuit is site-wide and applies to admins too. It is not a billing guarantee.
+  // Administrators have no NoteFlow usage allowance. Keep metering every attempt.
   const day = Math.floor(Date.now()/86400000);
-  const reserved = await env.DB.prepare(`INSERT INTO vertex_budget(project,day,daily_count,total_count) VALUES(?,?,1,1)
+  await env.DB.prepare(`INSERT INTO vertex_budget(project,day,daily_count,total_count) VALUES(?,?,1,1)
     ON CONFLICT(project) DO UPDATE SET day=excluded.day,
-    daily_count=CASE WHEN vertex_budget.day=excluded.day THEN daily_count+1 ELSE 1 END,total_count=total_count+1
-    WHERE total_count<? AND (vertex_budget.day!=excluded.day OR daily_count<?) RETURNING total_count`)
-    .bind(c.project,day,c.total,c.daily).first();
-  if (!reserved) throw new AppError(429,'VERTEX_CAP','The site AI processing budget is paused. Your source notes are still available.',Math.ceil(((day+1)*86400000-Date.now())/1000));
+    daily_count=CASE WHEN vertex_budget.day=excluded.day THEN daily_count+1 ELSE 1 END,total_count=total_count+1 RETURNING total_count`)
+    .bind(c.project,day).first();
   const host = c.location === 'global' ? 'aiplatform.googleapis.com' : `${c.location}-aiplatform.googleapis.com`;
   // Bounded summary chunks retain a separate semantic review. Explicit LOW
   // thinking leaves more of the output budget and deadline for the actual JSON.
@@ -80,5 +80,6 @@ export async function vertexGenerate(payload: Record<string,unknown>, timeout: n
     method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify(requestPayload),
   },'Vertex AI',Math.min(timeout,120000));
   console.info(JSON.stringify({event:'vertex_response',model:c.model,elapsedMs:Date.now()-started,status:response.status}));
+  await recordEvent('vertex.response',{actor:owner,status:response.status,resource:c.model});
   return {response,provider:'gemini' as const,model:c.model,elapsedMs:Date.now()-started};
 }

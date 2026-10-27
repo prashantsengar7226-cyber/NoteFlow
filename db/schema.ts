@@ -7,6 +7,19 @@ import {
   uniqueIndex,
 } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
+export const userAccess = sqliteTable('user_access', {
+  owner:text('owner').primaryKey(),role:text('role',{enum:['user','admin','superuser']}).notNull().default('user'),
+  suspended:integer('suspended').notNull().default(0),revision:text('revision').notNull(),updatedBy:text('updated_by').notNull(),updatedAt:integer('updated_at').notNull(),
+});
+export const userDirectory = sqliteTable('user_directory', {
+  owner:text('owner').primaryKey(),email:text('email').notNull(),displayName:text('display_name').notNull(),firstSeen:integer('first_seen').notNull(),lastSeen:integer('last_seen').notNull(),
+});
+export const adminAudit = sqliteTable('admin_audit', {
+  id:text('id').primaryKey(),actor:text('actor').notNull(),action:text('action').notNull(),target:text('target').notNull(),beforeValue:text('before_value').notNull(),afterValue:text('after_value').notNull(),reason:text('reason').notNull(),createdAt:integer('created_at').notNull(),
+},t=>[index('admin_audit_created').on(t.createdAt)]);
+export const operationalEvents = sqliteTable('operational_events', {
+  id:text('id').primaryKey(),actor:text('actor'),event:text('event').notNull(),code:text('code'),status:integer('status'),resource:text('resource'),createdAt:integer('created_at').notNull(),
+},t=>[index('operational_events_created').on(t.createdAt)]);
 export const aiCredentials = sqliteTable('ai_credentials', {
   owner: text('owner').primaryKey(), provider: text('provider').notNull(), model: text('model').notNull(),
   ciphertext: text('ciphertext').notNull(), revision: text('revision').notNull(), updatedAt: integer('updated_at').notNull(),

@@ -80,7 +80,7 @@ test('unexpected errors never return SQL, paths, secret values or stack traces',
   const logs=[];
   console.error = value => logs.push(value);
   try {
-    const response = handleError(new Error('SELECT secret FROM accounts; C:\\private\\secret.txt credential=SENSITIVE_FIXTURE'));
+    const response = await handleError(new Error('SELECT secret FROM accounts; C:\\private\\secret.txt credential=SENSITIVE_FIXTURE'));
     assert.equal(response.status,500);
     const output=await response.text();
     for (const forbidden of ['SELECT','secret.txt','SENSITIVE_FIXTURE','Error:',' at ']) assert.ok(!output.includes(forbidden));

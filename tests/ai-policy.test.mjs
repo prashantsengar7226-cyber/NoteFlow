@@ -17,7 +17,7 @@ test('paid boundary rejects anonymous, regular, small-tool and personal-key call
   let calls=0;globalThis.fetch=async()=>{calls++;throw new Error('Unexpected paid request');};
   await assert.rejects(vertexGenerate({},1000),e=>e.code==='VERTEX_ADMIN_ONLY');
   for(const scope of [{owner:'regular-user',feature:'summary'},
-    {owner:admin,feature:'quiz'}, {owner:admin,feature:'summary',candidate:{provider:'gemini',key:'personal',model:'test'}}]) {
+    {owner:admin,role:'admin',feature:'quiz'}, {owner:admin,role:'admin',feature:'summary',candidate:{provider:'gemini',key:'personal',model:'test'}}]) {
     await aiContext.run(scope,async()=>{
       assert.equal(usesVertex(),false);
       await assert.rejects(vertexGenerate({},1000),e=>e.code==='VERTEX_ADMIN_ONLY');
@@ -25,9 +25,10 @@ test('paid boundary rejects anonymous, regular, small-tool and personal-key call
     });
   }
   assert.equal(calls,0);
-  await aiContext.run({owner:admin,feature:'insights'},async()=>assert.equal(usesVertex(),true));
+  await aiContext.run({owner:admin,role:'admin',feature:'insights'},async()=>assert.equal(usesVertex(),true));
 });
 beforeEach(async()=>{
+  await env.DB.prepare("INSERT INTO user_access(owner,role,suspended,revision,updated_by,updated_at) VALUES(?,'admin',0,?,'test',?) ON CONFLICT(owner) DO UPDATE SET role='admin',suspended=0").bind('12345678-1234-1234-1234-123456789abc',crypto.randomUUID(),Date.now()).run();
   await env.DB.prepare('DELETE FROM ai_operations').run();
   await env.DB.prepare('DELETE FROM limits').run();
   await env.DB.prepare('DELETE FROM vertex_budget').run();
@@ -106,7 +107,7 @@ test('free revision guides do not reserve a weekly paid allowance',async()=>{
   await settleOperation('bob','run-0',false);
   assert.equal((await weeklyUsage('bob')).used,0);
 });
-test('admin allowlist bypasses weekly allowance; personal keys and small features do not reserve it',async()=>{
+test('database admin role bypasses weekly allowance; personal keys and small features do not reserve it',async()=>{
   const admin='12345678-1234-1234-1234-123456789abc';env.AI_ADMIN_USER_IDS=admin;
   for(let i=0;i<25;i++)await reserveOperation(admin,`${i}`,'summary');
   assert.equal((await weeklyUsage(admin)).limit,null);
@@ -124,18 +125,19 @@ test('small feature calls have no daily user cap and cannot route to Vertex or p
     await assert.rejects(ai('test','test',z.object({ok:z.boolean()}),[]),e=>e.code==='AI_NOT_CONFIGURED');
   }));
 });
-test('Vertex auth and inference use fixed hosts, global attempt cap covers admins and no fallback',async()=>{
+test('Vertex auth uses fixed hosts; database admins bypass product caps but attempts remain metered',async()=>{
   const {privateKey}=generateKeyPairSync('rsa',{modulusLength:2048});
   Object.assign(env,{VERTEX_ENABLED:'true',VERTEX_PROJECT_ID:'test-project',VERTEX_LOCATION:'global',VERTEX_MODEL:'gemini-test',VERTEX_CREDIT_EXPIRES_AT:'2099-01-01',VERTEX_DAILY_REQUEST_CAP:'1',VERTEX_TOTAL_REQUEST_CAP:'2',VERTEX_SERVICE_ACCOUNT_JSON:JSON.stringify({type:'service_account',client_email:'test@test-project.iam.gserviceaccount.com',private_key:privateKey.export({type:'pkcs8',format:'pem'})})});
   env.VERTEX_MODEL='gemini-3.5-flash';
   const urls=[];
   globalThis.fetch=async(url,init)=>{urls.push(url);assert.equal(init.redirect,'manual');if(!url.includes('oauth2'))assert.equal(JSON.parse(init.body).generationConfig.thinkingConfig.thinkingLevel,'LOW');return url.includes('oauth2')?Response.json({access_token:'fixture-token',expires_in:3600}):Response.json({candidates:[]});};
   const owner='12345678-1234-1234-1234-123456789abc';env.AI_ADMIN_USER_IDS=owner;
-  await aiContext.run({owner,feature:'summary'},async()=>{
+  await aiContext.run({owner,role:'admin',feature:'summary'},async()=>{
     await vertexGenerate({},1000);
-    await assert.rejects(vertexGenerate({},1000),e=>e.code==='VERTEX_CAP');
+    await vertexGenerate({},1000);
+    assert.equal((await env.DB.prepare('SELECT total_count FROM vertex_budget').first()).total_count,2);
   });
-  assert.equal(urls.length,2);
+  assert.equal(urls.length,3);
   assert.equal(urls[1],'https://aiplatform.googleapis.com/v1/projects/test-project/locations/global/publishers/google/models/gemini-3.5-flash:generateContent');
   env.VERTEX_CREDIT_EXPIRES_AT='2020-01-01';assert.throws(vertexConfig,e=>e.code==='VERTEX_NOT_CONFIGURED');
 });

@@ -4,6 +4,9 @@ import { spawnSync } from 'node:child_process';
 const dest = new URL('../.test-runtime/', import.meta.url);
 await mkdir(dest, { recursive: true });
 const sources = {
+  'lib/access.ts':'access.mjs',
+  'lib/operations.ts':'operations.mjs',
+  'app/api/admin/route.ts':'admin.mjs',
   'lib/revision-guide.ts':'revision-guide.mjs',
   'lib/api-client.ts':'api-client.mjs',
   'lib/ai-policy.ts':'ai-policy.mjs',
@@ -45,7 +48,7 @@ for (const [path, name] of Object.entries(sources)) {
     .transpileModule(text, {
       compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 },
     })
-    .outputText.replace(/(['"])(?:@\/lib\/|\.\/)(ai-policy|vertex|ai-context|ai-models|personal-ai|summary-quality|ai-jobs)\1/g, "'./$2.mjs'")
+    .outputText.replace(/(['"])(?:@\/lib\/|\.\/)(access|operations|ai-policy|vertex|ai-context|ai-models|personal-ai|summary-quality|ai-jobs)\1/g, "'./$2.mjs'")
     .replaceAll("'next/server'", "'./harness.mjs'")
     .replaceAll("'cloudflare:workers'", "'./harness.mjs'")
     .replaceAll("'@/lib/billing'", "'./billing.mjs'")
@@ -58,6 +61,7 @@ for (const [path, name] of Object.entries(sources)) {
     .replaceAll("'@/lib/plans'", "'./plans.mjs'")
     .replaceAll("'@/lib/imports'", "'./imports.mjs'")
     .replaceAll("'./platform'", "'./harness.mjs'")
+    .replaceAll("'@/lib/platform'", "'./harness.mjs'")
     .replaceAll("'./server'", "'./server.mjs'")
     .replaceAll("'./summary-progress'", "'./summary-progress.mjs'")
     .replaceAll("'./provider'", "'./provider.mjs'")
@@ -77,6 +81,7 @@ const result = process.argv.includes('--live-free-revision') ? spawnSync(process
     '--experimental-transform-types',
     '--test',
     'tests/auth.test.mjs',
+    'tests/admin.test.mjs',
     'tests/launch-config.test.mjs',
     'tests/signout.test.mjs',
     'tests/security.test.mjs',

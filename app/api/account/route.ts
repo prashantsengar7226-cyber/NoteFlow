@@ -6,6 +6,7 @@ import { guard, account, db, json, handleError, usage } from '@/lib/server';
 import { publicBilling, billingConfig } from '@/lib/billing';
 import { FEATURE_LIST, nextReset } from '@/lib/plans';
 import { featureRouting, weeklyUsage } from '@/lib/ai-policy';
+import { activeAccess } from '@/lib/access';
 export async function GET(request: Request) {
   try {
     const owner = await guard(request);
@@ -28,6 +29,8 @@ export async function GET(request: Request) {
       .bind(owner, billingConfig().keyMode)
       .all();
     return json({
+      accountId:owner,
+      role:(await activeAccess(owner)).role,
       profile: {
         name: user?.fullName || user?.displayName || 'My account',
         email: user?.email,

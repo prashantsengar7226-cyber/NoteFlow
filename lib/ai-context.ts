@@ -4,6 +4,7 @@ import type { RouterCandidate } from './provider';
 // Server-only request scope. Never change process.env for an individual user.
 export const aiContext = new AsyncLocalStorage<{
   owner: string;
+  role?: 'user' | 'admin' | 'superuser';
   candidate?: RouterCandidate;
   revision?: string;
   feature?: string;
