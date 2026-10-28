@@ -98,7 +98,7 @@ async function saveSourceNotes(job: AIJob, token: string | undefined, code: stri
 }
 
 /** One durable generation OR source-review step per invocation. */
-export async function runNextJob(owner?: string, id?: string) {
+export async function runNextJob(owner?: string, id?: string, deadline?: number) {
   const now = Date.now();
   const job = await db().prepare(`SELECT * FROM ai_jobs WHERE state IN ${active} AND next_at<=? AND lease_until<=? ${owner ? 'AND owner=?' : ''} ${id ? 'AND id=?' : ''} ORDER BY next_at,created_at LIMIT 1`)
     .bind(now, now, ...(owner ? [owner] : []), ...(id ? [id] : [])).first<AIJob>();
@@ -124,16 +124,17 @@ export async function runNextJob(owner?: string, id?: string) {
       // result never marks the AI job complete and costs no generation quota.
       await saveSourceNotes(job, token, 'AI_PENDING');
       const note = await ownedNote(job.note_id, job.owner);
-      return aiContext.run({ ...aiContext.getStore()!, operationId: job.id }, () => withAIFeature('summary', () => summaryStep(note, job.owner, JSON.parse(note.transcript) as Segment[], {
+      return aiContext.run({ ...aiContext.getStore()!, operationId: job.id, deadline }, () => withAIFeature('summary', () => summaryStep(note, job.owner, JSON.parse(note.transcript) as Segment[], {
         language: job.language, detail: job.detail, runId: job.run_id ?? undefined,
         completedParts: job.run_id ? job.completed_parts : undefined, qualityCheck: true,
       })));
     }), job.credential_revision);
-    await update('result' in result ? 'completed' : 'queued', null, Date.now() + 15000, result.completedParts > job.completed_parts ? 0 : job.failures, result.runId, result.completedParts, result.totalParts);
+    await update('result' in result ? 'completed' : 'queued', null, Date.now(), result.completedParts > job.completed_parts ? 0 : job.failures, result.runId, result.completedParts, result.totalParts);
+    return true;
   } catch (error) {
     const code = error instanceof AppError ? error.code : 'INTERNAL';
     await saveSourceNotes(job, token, code).catch(() => console.error(JSON.stringify({event:'source_notes_save_failed'})));
-    const waiting = ['WEEKLY_LIMIT','VERTEX_CAP','DAILY_LIMIT','PROVIDER_LIMIT','PROVIDER_COOLDOWN','AI_BUSY','SUMMARY_IN_PROGRESS'].includes(code);
+    const waiting = ['WORKER_YIELD','WEEKLY_LIMIT','VERTEX_CAP','DAILY_LIMIT','PROVIDER_LIMIT','PROVIDER_COOLDOWN','AI_BUSY','SUMMARY_IN_PROGRESS'].includes(code);
     const retryable = waiting || ['TIMEOUT','PROVIDER_BUSY','PROVIDER_NETWORK','PROVIDER_UNAVAILABLE','UPSTREAM_ERROR','PROVIDER_ERROR','NETWORK_ERROR','INVALID_AI_OUTPUT','INVALID_CITATION','OUTPUT_LIMIT','QUALITY_REVIEW','QUALITY_EVIDENCE','INTERNAL'].includes(code);
     const failures = job.failures + (waiting ? 0 : 1);
     const delay = error instanceof AppError && error.retryAfterSeconds ? error.retryAfterSeconds * 1000 : Math.min(900000, 60000 * 2 ** failures);
@@ -145,4 +146,16 @@ export async function runNextJob(owner?: string, id?: string) {
     if (!(retryable && failures < 3)) await settleOperation(job.owner,job.id,false);
     console.warn(JSON.stringify({event:'summary_queue_step',state:retryable && failures < 3 ? 'retry':'failed',code}));
   }
+}
+
+/** Advance saved steps in one bounded invocation, rather than one cron tick per
+ * draft/review. Each step still acquires its own lease and checkpoints its result. */
+export async function drainJobs(owner?: string, id?: string, budgetMs = 140000) {
+  const deadline = Date.now() + Math.min(140000, Math.max(0, budgetMs));
+  let steps = 0;
+  while (steps < 12 && deadline - Date.now() >= 65000) {
+    if (!await runNextJob(owner, id, deadline)) break;
+    steps++;
+  }
+  return steps;
 }

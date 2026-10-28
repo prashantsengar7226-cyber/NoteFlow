@@ -4,9 +4,9 @@ export const maxDuration = 180;
 import { after } from 'next/server';
 import { z } from 'zod';
 import { guard, body, limited, json, handleError, db } from '@/lib/server';
-import { enqueueSummary, jobInput, publicJob, findJob, cancelJob, runNextJob, type AIJob } from '@/lib/ai-jobs';
+import { enqueueSummary, jobInput, publicJob, findJob, cancelJob, drainJobs, type AIJob } from '@/lib/ai-jobs';
 function kick(owner: string, id: string) {
-  after(async () => { try { await runNextJob(owner, id); } catch { console.error('summary_worker_failed'); } });
+  after(async () => { try { await drainJobs(owner, id); } catch { console.error('summary_worker_failed'); } });
 }
 export async function POST(r: Request) {
   try {

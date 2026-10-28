@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import { api, recoverableImport } from '@/lib/api-client';
-import { summarySourceChunks } from '@/lib/study';
+import { summarySourceChunks, sourceTokenEstimate } from '@/lib/study';
 import { findStudyTool, SOURCE_HANDOFF } from '@/lib/study-tools';
 import {
   ArrowUpRight,
@@ -1543,6 +1543,9 @@ export default function Workspace({ name }: { name: string }) {
                     tabIndex={0}
                     key={tab}
                   >
+                    {['insights','mindmap','flashcards','quiz','slides'].includes(tab) && sourceTokenEstimate(note.transcript.map(s => s.text).join('')) > 4500 && (
+                      <p className="muted" role="note">This tool uses selected passages from your long transcript to keep requests manageable. It is not a complete summary. New quiz and flashcard sets prioritize passages not yet covered.</p>
+                    )}
                     {tab === 'summary' && (
                       <>
                         {summaryPending && summaryWork && (

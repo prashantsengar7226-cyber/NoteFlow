@@ -272,3 +272,12 @@ test('Groq json_validate_failed HTTP 400 falls through while true bad requests r
   await assert.rejects(routedGenerate(candidates,'system','source',{},5000),{code:'PROVIDER_REQUEST'});assert.equal(calls,1);
  });
 });
+
+test('free router retries only the explicit mandatory-reasoning rejection within its request',async()=>{
+ const sent=[];
+ await mock(async(url,init)=>{sent.push(JSON.parse(init.body));return sent.length===1?Response.json({error:{message:'Reasoning is mandatory for this endpoint and cannot be disabled.'}},{status:400}):completion();},async()=>{
+  await routedGenerate([{...candidates[1],freeOnly:true}],'system','source',{},8000);
+  assert.equal(sent.length,2);assert.equal(sent[0].reasoning.enabled,false);assert.equal(sent[1].reasoning.effort,'low');
+  assert.deepEqual(sent[1].provider.max_price,{prompt:0,completion:0,request:0});
+ });
+});

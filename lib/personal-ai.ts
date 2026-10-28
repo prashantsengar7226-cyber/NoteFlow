@@ -49,11 +49,14 @@ export async function withOwnerAI<T>(owner: string, work: () => Promise<T>, revi
 }
 
 /** At most one paid AI operation per account at a time, across instances. */
-export async function withAILease<T>(owner: string, work: () => Promise<T>) {
+export async function withAILease<T>(owner: string, work: () => Promise<T>, lane: 'summary' | 'interactive' = 'summary') {
+  // One summary and one interactive request may run concurrently. Each lane
+  // remains serialized across tabs and serverless instances.
+  const leaseOwner = lane === 'summary' ? owner : `interactive:${owner}`;
   const token = crypto.randomUUID();
   const lease = await env.DB.prepare('INSERT INTO ai_owner_leases(owner,token,expires_at) VALUES(?,?,?) ON CONFLICT(owner) DO UPDATE SET token=excluded.token,expires_at=excluded.expires_at WHERE expires_at<=? RETURNING token')
-    .bind(owner, token, Date.now() + 300000, Date.now()).first();
+    .bind(leaseOwner, token, Date.now() + 300000, Date.now()).first();
   if (!lease) throw new AppError(409, 'AI_BUSY', 'Another AI task is running. Your queued work will continue automatically.', 30);
   try { return await work(); }
-  finally { await env.DB.prepare('DELETE FROM ai_owner_leases WHERE owner=? AND token=?').bind(owner, token).run(); }
+  finally { await env.DB.prepare('DELETE FROM ai_owner_leases WHERE owner=? AND token=?').bind(leaseOwner, token).run(); }
 }

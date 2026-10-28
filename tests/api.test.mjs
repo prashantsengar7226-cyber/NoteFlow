@@ -46,10 +46,10 @@ test('timed-out legacy resume splits only the unfinished suffix and survives fai
     const view=await call(notes,'GET',null,owner,'?id='+note.id);
     assert.equal(view.data.summaryProgress.preview.coverage.processedCharacters,16000);
     globalThis.fetch=async(_url,options)=>{
-      const content=JSON.parse(options.body).contents[0].parts[0].text.split('CURRENT PART:\n')[1];
+      const content=JSON.parse(options.body).contents[0].parts[0].text.split('CURRENT PART:\n')[1].split('\nOUTPUT LANGUAGE:')[0];
       assert.equal(content,sourceText(expected[calls]));
       calls++;
-      return geminiResult({title:'Suffix',overview:'New part',keyPoints:[{text:'New fact',segmentIds:[1]}],chapters:[]});
+      return geminiResult({title:'Suffix',overview:'नया भाग',keyPoints:[{text:'New fact',segmentIds:[1]}],chapters:[]});
     };
     let step=await call(actions,'POST',input,owner);
     while(step.status===200 && !step.data.result) step=await call(actions,'POST',{...input,runId,completedParts:step.data.completedParts},owner);
@@ -143,7 +143,7 @@ test('overlapping practice calls are throttled and a later batch preserves saved
     globalThis.fetch=async()=>{
       const index=calls++;
       if(index===0){signal();await new Promise(resolve=>{release=resolve;});}
-      return geminiResult({questions:[{question:index===0?'How do you start?':'What happens after a break?',options:['Set a goal','Open tabs','Get distracted','Do nothing'],correctIndex:0,explanation:'The source explains the routine.',segmentIds:[0]}]});
+      return geminiResult({questions:[{question:index===0?'How do you start?':'What happens after a break?',correctAnswer:'Set a goal',distractors:['Open tabs','Get distracted','Do nothing'],explanation:'The source explains the routine.',segmentIds:[0]}]});
     };
     const first=call(actions,'POST',{id:n.id,action:'quiz',count:5},owner);await ready;
     assert.equal((await call(actions,'POST',{id:n.id,action:'quiz',count:5},owner)).data.code,'AI_BUSY');
@@ -259,7 +259,7 @@ test('every additional study tool generates, persists after reload, and stays pr
   const fixtures = {
     insights: { glossary: [{ term: 'Goal', definition: 'A clear study objective.', segmentIds: [0] }], actions: [], caveats: [] },
     flashcards: { cards: [{ front: 'How should a session start?', back: 'Choose one clear goal.', segmentIds: [0] }] },
-    quiz: { questions: [{ question: 'What comes first?', options: ['A goal', 'Distraction', 'A break', 'A report'], correctIndex: 0, explanation: 'Start with a clear goal.', segmentIds: [0] }] },
+    quiz: { questions: [{ question: 'What comes first?', correctAnswer:'A goal', distractors:['Distraction','A break','A report'], explanation: 'Start with a clear goal.', segmentIds: [0] }] },
     mindmap: { title: 'Study routine', branches: [{ label: 'Start', details: ['Choose a goal'] }] },
     slides: { slides: [{ title: 'Start with a goal', bullets: ['Choose one clear objective'], notes: 'Use the source routine.' }] },
     translation: { text: '[0] Commencez par un objectif clair.' },
@@ -279,6 +279,9 @@ test('every additional study tool generates, persists after reload, and stays pr
       if (action === 'chat') {
         assert.equal(saved.messages.length, 2);
         assert.equal(saved.messages[1].answer, fixture.answer);
+      } else if(action === 'quiz') {
+        const q=saved.artifacts.quiz.questions[0];assert.equal(q.options[q.correctIndex],fixture.questions[0].correctAnswer);
+        assert.deepEqual(new Set(q.options),new Set([fixture.questions[0].correctAnswer,...fixture.questions[0].distractors]));
       } else {
         for (const [key, value] of Object.entries(fixture)) assert.deepEqual(saved.artifacts[action][key], value, action);
       }
@@ -516,7 +519,7 @@ test('Gemini summaries and source chat persist with the selected provider and cr
   env.OPENAI_API_KEY = 'unused-openai-key';
   const generated = {
     title: 'Focused study',
-    overview: 'Start with a clear goal.',
+    overview: 'एक स्पष्ट लक्ष्य से शुरू करें।',
     keyPoints: [{ text: 'Reduce distractions.', segmentIds: [0] }],
     chapters: [],
   };
@@ -951,7 +954,7 @@ test('300,000-character Hindi imports, resumable summaries and exports preserve 
     seen += content;
     return geminiResult({
       title: 'Complete guide',
-      overview: 'Saved part',
+      overview: 'सहेजा गया भाग',
       keyPoints: [
         { text: content.includes('FINALEND') ? 'FINALEND' : `Part ${calls}`, segmentIds: [0] },
       ],

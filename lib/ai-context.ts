@@ -9,6 +9,7 @@ export const aiContext = new AsyncLocalStorage<{
   revision?: string;
   feature?: string;
   operationId?: string;
+  deadline?: number;
 }>();
 export const usesPersonalAI = (owner: string) => {
   const scope = aiContext.getStore();

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { summaryChunks, summarySourceChunks, sourceTokenEstimate, summaryBoundaryContext, summaryLanguageInstruction, mergeStudyItems, studyCoverage } from '../.test-runtime/study.mjs';
+import { summaryChunks, summarySourceChunks, sourceTokenEstimate, summaryBoundaryContext, summaryLanguageInstruction, mergeStudyItems, studyCoverage, studyToolContext } from '../.test-runtime/study.mjs';
 import { createStudyPdf, createSummaryCollectionPdf } from '../.test-runtime/pdf.mjs';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { readFile, writeFile } from 'node:fs/promises';
@@ -205,4 +205,15 @@ test('three document summaries export in order with a contents page and separate
   await assert.rejects(createSummaryCollectionPdf([{ ...documents[0], summary: null }], fonts), {
     code: 'INCOMPLETE_BATCH',
   });
+});
+
+test('long multilingual tool context is bounded, source-exact and includes the end; practice rotates away from cited IDs',()=>{
+ const segments=Array.from({length:100},(_,id)=>({id,start:id,text:'अध्ययन तथ्य '.repeat(120)}));
+ const selected=studyToolContext(segments);
+ assert.ok(sourceTokenEstimate(selected.map(s=>s.text).join(''))<=4500);
+ assert.equal(selected.at(-1).id,99);
+ assert.ok(selected.every(s=>segments[s.id].text.includes(s.text)));
+ const next=studyToolContext(segments,selected.map(s=>({front:'test',segmentIds:[s.id]})));
+ assert.ok(next.every(s=>!selected.some(old=>old.id===s.id)));
+ const small=[{id:8,start:0,text:'A short source.'}];assert.equal(studyToolContext(small),small);
 });

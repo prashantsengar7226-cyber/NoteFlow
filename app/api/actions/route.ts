@@ -220,7 +220,7 @@ export async function POST(r: Request) {
     if (reservation) await settleOperation(owner, reservation.id, true);
     return json({ result, ...(added === undefined ? {} : { added }) });
     };
-    return await (input.action === 'basic' ? withAILease(owner, execute) : withOwnerAI(owner, () => withAIFeature(input.action, () => withAILease(owner, execute))));
+    return await (input.action === 'basic' ? withAILease(owner, execute) : withOwnerAI(owner, () => withAIFeature(input.action, () => withAILease(owner, execute, input.action === 'summary' ? 'summary' : 'interactive'))));
   } catch (e) {
     if (reservation) await settleOperation(reservation.owner, reservation.id, false).catch(() => {});
     await refund?.().catch(() =>

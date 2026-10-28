@@ -8,7 +8,7 @@ import {config,consumeService,ai} from '../.test-runtime/server.mjs';
 import {vertexConfig,vertexGenerate} from '../.test-runtime/vertex.mjs';
 import {generateKeyPairSync} from 'node:crypto';
 import {z} from 'zod';
-import {enqueueSummary,runNextJob,findJob,cancelJob} from '../.test-runtime/ai-jobs.mjs';
+import {enqueueSummary,runNextJob,drainJobs,findJob,cancelJob} from '../.test-runtime/ai-jobs.mjs';
 import {summaryClaims,evidenceCatalog,resolveEvidence,validateReview,alignReviewedCitations} from '../.test-runtime/summary-quality.mjs';
 const originalFetch=globalThis.fetch;
 test('paid boundary rejects anonymous, regular, small-tool and personal-key callers without fetching',async()=>{
@@ -57,7 +57,7 @@ test('regular workspace and queued revision review stay free even with Vertex co
     assert.equal(url,'https://openrouter.ai/api/v1/chat/completions');calls++;
     const request=JSON.parse(init.body);
     assert.deepEqual(request.provider.max_price,{prompt:0,completion:0,request:0});
-    assert.equal(request.provider.sort,'throughput');assert.equal(request.reasoning.effort,'low');
+    assert.equal(request.provider.sort,'throughput');assert.equal(request.reasoning.enabled,false);
     const value=calls===1?part:{claims:summaryClaims(part).map(c=>({claimId:c.id,sourceIds:['0:0'],reason:'',verdict:'supported'})),omissions:[]};
     return Response.json({model:'synthetic/free-model:free',choices:[{finish_reason:'stop',message:{content:JSON.stringify(value)}}]});
   };
@@ -181,4 +181,15 @@ test('queued Vertex generation and review count once; replay is free and cancell
   await reserveOperation(owner,another.id,'summary');
   assert.equal((await weeklyUsage(owner)).used,2);
   await cancelJob(owner,another.id);assert.equal((await weeklyUsage(owner)).used,1);
+});
+
+test('one worker invocation drafts and reviews a free summary without a cron delay',async()=>{
+ const owner='burst-fixture',id=crypto.randomUUID();
+ const part={title:'Square',overview:'The square is blue.',keyPoints:[{text:'The square is blue.',segmentIds:[0]}],chapters:[]};
+ await env.DB.prepare('INSERT INTO notes(id,owner,title,source,transcript,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').bind(id,owner,'Test','text',JSON.stringify([{id:0,start:0,text:'The square is blue.'}]),Date.now(),Date.now()).run();
+ let calls=0;globalThis.fetch=async()=>{calls++;const value=calls===1?part:{claims:summaryClaims(part).map(c=>({claimId:c.id,sourceIds:['0:0'],reason:'',verdict:'supported'})),omissions:[]};return Response.json({model:'synthetic:free',choices:[{finish_reason:'stop',message:{content:JSON.stringify(value)}}]});};
+ const job=await enqueueSummary(owner,{id,language:'English',detail:'balanced'});
+ assert.equal(await drainJobs(owner,job.id),2);
+ assert.equal((await findJob(owner,job.id)).state,'completed');assert.equal(calls,2);
+ assert.equal(await drainJobs(owner,job.id),0);assert.equal(calls,2);
 });

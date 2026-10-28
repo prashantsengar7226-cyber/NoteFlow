@@ -58,6 +58,34 @@ export function sourceTokenEstimate(text: string) {
   return Math.ceil(cost);
 }
 
+/** Bounded study-tool context, spread over the source. Practice prefers passages
+ * not yet cited, so subsequent sets can cover the remainder. Never used for
+ * summaries or translations, where silently skipping source would be wrong. */
+export function studyToolContext(segments: Segment[], items: StudyItem[] = [], budget = 4500): Segment[] {
+  if (sourceTokenEstimate(segments.map(s => s.text).join('')) <= budget) return segments;
+  const cited = new Set(items.flatMap(item => item.segmentIds));
+  const candidates = summaryChunks(segments, 1000);
+  const passages = candidates.flat();
+  const pending = passages.filter(s => !cited.has(s.id));
+  const pool = pending.length ? pending : passages;
+  const selected: Segment[] = [];
+  let used = 0;
+  // Distribute selections rather than consuming only the introduction.
+  const slots = Math.min(12, pool.length);
+  for (let i = 0; i < slots; i++) {
+    const part = pool[Math.floor(i * (pool.length - 1) / Math.max(1, slots - 1))];
+    const allowance = Math.floor((budget - used) / (slots - i));
+    let text = '', cost = 0;
+    for (const character of part.text) {
+      const weight = character.codePointAt(0)! < 128 ? 0.25 : 1;
+      if (cost + weight > allowance) break;
+      text += character; cost += weight;
+    }
+    if (text) { selected.push({...part, text}); used += Math.ceil(cost); }
+  }
+  return selected;
+}
+
 function multilingualChunks(segments: Segment[], characterBudget: number): Segment[][] {
   const chunks: Segment[][] = [];
   let chunk: Segment[] = [], characters = 0, cost = 0;

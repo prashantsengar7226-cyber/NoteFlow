@@ -51,6 +51,13 @@ export async function providerFetch(url: string, init: RequestInit, name: string
     JSON.stringify({ event: 'provider_failed', provider: name, status: response.status }),
   );
   const retryDelay = retryAfter(response.headers.get('retry-after'));
+  if (name === 'OpenRouter' && response.status === 400) {
+    const data = await providerJson(response, 100000).catch(() => null);
+    const error = data?.error as {message?:unknown} | undefined;
+    if (error?.message === 'Reasoning is mandatory for this endpoint and cannot be disabled.')
+      throw new AppError(502, 'REASONING_REQUIRED', 'This model requires reasoning.');
+    throw new AppError(502, 'PROVIDER_REQUEST', 'The AI provider rejected this request. Check the selected model settings.');
+  }
   // Groq returns a generation/schema failure as HTTP 400. This is different
   // from an invalid request setting: permit fallback only for its exact code.
   if (name === 'Groq' && response.status === 400) {
@@ -263,28 +270,35 @@ async function compatibleGenerate(
     'Content-Type': 'application/json',
   };
   if (!isGroq) headers['X-Title'] = 'NoteFlow';
-  const response = await providerFetch(url, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
+  const started = Date.now();
+  const requestBody = {
       model: candidate.model,
       messages: [
         { role: 'system', content: systemInstruction + (schema ? '\nRequired JSON Schema (all fields and limits are mandatory):\n' + JSON.stringify(schema) : '') },
         { role: 'user', content },
       ],
-      // JSON-object mode guarantees syntax only. Use constrained schema output
-      // on supported Groq models and require compatible OpenRouter endpoints.
       response_format: schema && (!isGroq || ['openai/gpt-oss-120b','openai/gpt-oss-20b','qwen/qwen3.8-27b','meta-models/muse-spark-open'].includes(candidate.model))
         ? { type: 'json_schema', json_schema: { name: 'noteflow_output', strict: true, schema } }
         : { type: 'json_object' },
       ...(!isGroq && (schema || candidate.freeOnly) ? { provider: { require_parameters: !!schema, ...(candidate.freeOnly ? { sort: 'throughput', max_price: { prompt: 0, completion: 0, request: 0 } } : {}) } } : {}),
-      // Leave output capacity for the notes. The separate source review remains
-      // mandatory; do not consume the whole deadline on default deep reasoning.
-      ...(!isGroq && candidate.freeOnly ? { reasoning: { effort: 'low' } } : {}),
+      ...(!isGroq && candidate.freeOnly ? { reasoning: { enabled: false } } : {}),
       max_tokens: 8192,
       temperature: 0.2,
-    }),
-  }, isGroq ? 'Groq' : 'OpenRouter', timeout);
+  };
+  const send = (body:Record<string,unknown>, remaining:number) => providerFetch(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  }, isGroq ? 'Groq' : 'OpenRouter', remaining);
+  let response:Response;
+  try { response = await send(requestBody, timeout); }
+  catch(error) {
+    const remaining=timeout-(Date.now()-started);
+    // Retry only an explicit pre-generation settings rejection, never an
+    // ambiguous timeout or quota failure, and retain the original deadline.
+    if (!(error instanceof AppError) || error.code!=='REASONING_REQUIRED' || !candidate.freeOnly || remaining<1000) throw error;
+    response=await send({...requestBody,reasoning:{effort:'low'}},remaining);
+  }
   return { response, model: candidate.model };
 }
 

@@ -418,3 +418,13 @@ test('removing a key cancels its queue and leaves other accounts untouched',asyn
   assert.equal((await call(connection,'DELETE')).status,200);
   assert.equal((await findJob('alice',job.id)).state,'cancelled');assert.equal((await call(connection,'GET',undefined,'bob')).data.mode,'personal');
 });
+
+test('interactive study tools can run during a summary while each lane stays serialized',async()=>{
+ await withAILease('lane-test',async()=>{
+   await assert.rejects(withAILease('lane-test',async()=>{}),{code:'AI_BUSY'});
+   await withAILease('lane-test',async()=>{
+     await assert.rejects(withAILease('lane-test',async()=>{},'interactive'),{code:'AI_BUSY'});
+   },'interactive');
+ });
+ await withAILease('lane-test',async()=>{},'interactive');
+});
