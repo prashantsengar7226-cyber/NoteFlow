@@ -7,6 +7,19 @@ beforeEach(async()=>{await env.DB.prepare("DELETE FROM limits WHERE owner LIKE '
 const candidates=[{provider:'groq',key:'PRIVATE_GROQ_FIXTURE',model:'groq-fixture'},
   {provider:'openrouter',key:'PRIVATE_ROUTER_FIXTURE',model:'openrouter/free'}];
 const payload={answer:'Source answer',segmentIds:[0]};
+test('Gemini distinguishes invalid or restricted keys without exposing upstream details',async()=>{
+  for(const reason of ['API_KEY_INVALID','API_KEY_SERVICE_BLOCKED','SERVICE_DISABLED','UNKNOWN',null]) {
+    let calls=0;
+    await mock(async()=>{calls++;return reason===null?new Response('PRIVATE_KEY',{status:400}):Response.json({error:{message:'PRIVATE_KEY',details:[{reason}]}},{status:400});},async()=>{
+      await assert.rejects(providerFetch('https://example.invalid',{},'Gemini'),error=>{
+        assert.equal(error.code,reason && reason!=='UNKNOWN'?'PROVIDER_AUTH':'PROVIDER_REQUEST');
+        assert.ok(!error.message.includes('PRIVATE_KEY'));
+        return true;
+      });
+      assert.equal(calls,1);
+    });
+  }
+});
 const completion=(model='vendor/actual-model')=>Response.json({model,choices:[{finish_reason:'stop',message:{content:JSON.stringify(payload)}}]});
 
 test('last available provider recovers once from explicit gateway failure within its deadline', async () => {

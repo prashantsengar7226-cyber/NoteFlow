@@ -51,6 +51,20 @@ export async function providerFetch(url: string, init: RequestInit, name: string
     JSON.stringify({ event: 'provider_failed', provider: name, status: response.status }),
   );
   const retryDelay = retryAfter(response.headers.get('retry-after'));
+  if (name === 'Gemini' && response.status === 400) {
+    // Google's invalid-key response can be HTTP 400 rather than 401. Decode
+    // only bounded, known error identifiers; never expose upstream messages.
+    const data = await providerJson(response, 100000).catch(() => null);
+    const error = data?.error as {details?: unknown} | undefined;
+    const reasons = Array.isArray(error?.details)
+      ? error.details.map(detail => detail && typeof detail === 'object' && 'reason' in detail ? detail.reason : undefined)
+      : [];
+    if (reasons.includes('API_KEY_INVALID'))
+      throw new AppError(422, 'PROVIDER_AUTH', 'Gemini rejected the API key. Check that you copied the complete key from Google AI Studio, then reconnect.');
+    if (reasons.some(reason => ['API_KEY_SERVICE_BLOCKED','SERVICE_DISABLED'].includes(String(reason))))
+      throw new AppError(422, 'PROVIDER_AUTH', 'This key or project does not allow the Gemini API. Check its API restrictions and enabled services in Google Cloud.');
+    throw new AppError(502, 'PROVIDER_REQUEST', 'Gemini rejected the model or generation settings. Try another model available to this key. Your saved work is safe.');
+  }
   if (name === 'OpenRouter' && response.status === 400) {
     const data = await providerJson(response, 100000).catch(() => null);
     const error = data?.error as {message?:unknown} | undefined;

@@ -9,7 +9,8 @@ import {vertexConfig,vertexGenerate} from '../.test-runtime/vertex.mjs';
 import {generateKeyPairSync} from 'node:crypto';
 import {z} from 'zod';
 import {enqueueSummary,runNextJob,drainJobs,findJob,cancelJob} from '../.test-runtime/ai-jobs.mjs';
-import {summaryClaims,evidenceCatalog,resolveEvidence,validateReview,alignReviewedCitations} from '../.test-runtime/summary-quality.mjs';
+import {summaryClaims,evidenceCatalog,resolveEvidence,validateReview,alignReviewedCitations,repairSummaryPart,checkSummaryPart} from '../.test-runtime/summary-quality.mjs';
+import {summaryTrialEnabled} from '../.test-runtime/summary-trial.mjs';
 import {summarySourceChunks} from '../.test-runtime/study.mjs';
 const originalFetch=globalThis.fetch;
 test('paid boundary rejects anonymous, regular, small-tool and personal-key callers without fetching',async()=>{
@@ -37,7 +38,7 @@ beforeEach(async()=>{
   env.GEMINI_API_KEY='not-free';env.GROQ_API_KEY='not-free';env.OPENROUTER_API_KEY='free-fixture';env.OPENROUTER_MODEL='openrouter/free';
   env.VERTEX_ENABLED='false';env.AI_ADMIN_USER_IDS='';env.GEMINI_FREE_API_KEY='gemini-free-fixture';env.GEMINI_FREE_TIER_CONFIRMED='true';
 });
-afterEach(()=>{globalThis.fetch=originalFetch;});
+afterEach(()=>{globalThis.fetch=originalFetch;delete env.SUMMARY_LARGE_BATCHES;delete env.SUMMARY_PIPELINE_TRIAL;delete env.VERCEL;});
 
 test('regular workspace and queued revision review stay free even with Vertex configured',async()=>{
   const owner='regular-free-fixture',id=crypto.randomUUID();
@@ -196,8 +197,8 @@ test('one worker invocation drafts and reviews a free summary without a cron del
 
 test('Gemini-only queue completes every transcript part, including its tail; quota never triggers another model',async()=>{
  const owner='gemini-long-fixture',id=crypto.randomUUID();
- const source=Array.from({length:12},(_,i)=>({id:i,start:i*60,text:('The square is blue. '.repeat(120))+(i===11?'The final exam is on 15 November.':'')}));
- const total=summarySourceChunks(source,'balanced').length;assert.ok(total>1);
+ const source=Array.from({length:12},(_,i)=>({id:i,start:i*60,text:('The square is blue. '.repeat(500))+(i===11?'The final exam is on 15 November.':'')}));
+ const total=summarySourceChunks(source,'balanced').length;assert.ok(total>6);
  await env.DB.prepare('INSERT INTO notes(id,owner,title,source,transcript,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').bind(id,owner,'Long source','text',JSON.stringify(source),Date.now(),Date.now()).run();
  let calls=0,part,seenTail=false;
  globalThis.fetch=async(url,init)=>{
@@ -209,9 +210,158 @@ test('Gemini-only queue completes every transcript part, including its tail; quo
    return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(value)}]}}]});
  };
  const job=await enqueueSummary(owner,{id,language:'English',detail:'balanced'});
- for(let i=0;i<total*2;i++)await runNextJob(owner,job.id);
+ assert.equal(await drainJobs(owner,job.id)+await drainJobs(owner,job.id),total*2);
  const done=await findJob(owner,job.id);assert.equal(done.state,'completed');assert.equal(done.completed_parts,total);assert.equal(calls,total*2);assert.equal(seenTail,true);
  calls=0;globalThis.fetch=async url=>{calls++;assert.ok(url.includes('generativelanguage.googleapis.com'));return Response.json({error:{status:'RESOURCE_EXHAUSTED'}},{status:429,headers:{'retry-after':'60'}});};
  await aiContext.run({owner,feature:'summary'},()=>assert.rejects(ai('test','test',z.object({ok:z.boolean()}),[]),e=>e.code==='PROVIDER_LIMIT'));
  assert.equal(calls,1);
+});
+
+test('worker uses remaining time and deadline handoffs do not become provider backoff',async()=>{
+ env.SUMMARY_LARGE_BATCHES='true'; const owner='deadline-performance',id=crypto.randomUUID();
+ await env.DB.prepare('INSERT INTO notes(id,owner,title,source,transcript,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').bind(id,owner,'Clock test','text',JSON.stringify([{id:0,start:0,text:'The square is blue.'}]),Date.now(),Date.now()).run();
+ const job=await enqueueSummary(owner,{id,language:'English',detail:'balanced'});
+ let calls=0;
+ globalThis.fetch=async()=>{calls++;throw Error('No call expected');};
+ await runNextJob(owner,job.id,Date.now()+1000);
+ const yielded=await findJob(owner,job.id);
+ assert.equal(yielded.error_code,'WORKER_YIELD');assert.equal(yielded.failures,0);assert.ok(yielded.next_at<=Date.now());assert.equal(calls,0);
+ const originalNow=Date.now;let clock=originalNow();
+ const part={title:'Square',overview:'The square is blue.',keyPoints:[{text:'The square is blue.',segmentIds:[0]}],chapters:[]};
+ try {
+  Date.now=()=>clock;
+  globalThis.fetch=async()=>{calls++;clock+=calls===1?80000:1000;const value=calls===1?part:{claims:summaryClaims(part).map(c=>({claimId:c.id,sourceIds:['0:0'],reason:'',verdict:'supported'})),omissions:[]};return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(value)}]}}]});};
+  assert.equal(await drainJobs(owner,job.id),2);
+  assert.equal((await findJob(owner,job.id)).state,'completed');assert.equal(calls,2);
+ } finally {Date.now=originalNow;}
+});
+
+test('changing large-batch flag preserves the saved plan and checked coverage on resume',async()=>{
+ const owner='large-plan-resume',id=crypto.randomUUID();
+ const source=[{id:0,start:0,text:'The square is blue. '.repeat(1900)}];
+ assert.ok(summarySourceChunks(source,'balanced',3).length>1);
+ assert.equal(summarySourceChunks(source,'balanced',4).length,1);
+ await env.DB.prepare('INSERT INTO notes(id,owner,title,source,transcript,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').bind(id,owner,'Test','text',JSON.stringify(source),Date.now(),Date.now()).run();
+ const part={title:'Square',overview:'The square is blue.',keyPoints:[{text:'The square is blue.',segmentIds:[0]}],chapters:[]};
+ let calls=0;globalThis.fetch=async()=>{calls++;return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(calls===1?part:{claims:summaryClaims(part).map(c=>({claimId:c.id,sourceIds:['0:0'],reason:'',verdict:'supported'})),omissions:[]})}]}}]});};
+ try {
+  env.SUMMARY_LARGE_BATCHES='true';
+  const job=await enqueueSummary(owner,{id,language:'English',detail:'balanced'});
+  await runNextJob(owner,job.id);
+  const row=await env.DB.prepare("SELECT content FROM artifacts WHERE note_id=? AND kind='__summary_progress'").bind(id).first();
+  assert.equal(JSON.parse(row.content).chunkVersion,4);
+  env.SUMMARY_LARGE_BATCHES='false';
+  await runNextJob(owner,job.id);
+  const done=await findJob(owner,job.id);assert.equal(done.state,'completed');assert.equal(done.total_parts,1);assert.equal(calls,2);
+ } finally {delete env.SUMMARY_LARGE_BATCHES;}
+});
+
+test('targeted repairs preserve supported claims and reject edits outside the review plan',async()=>{
+ const part={title:'Library',overview:'Library rules.',keyPoints:[{text:'Borrow for 14 days.',segmentIds:[0]},{text:'Fee is 20 rupees.',segmentIds:[1]}],chapters:[],sourceChecked:true};
+ const source=[{id:0,start:0,text:'Borrow for 14 days.'},{id:1,start:1,text:'The late fee is 2 rupees.'}];
+ const patch={claimId:'point:1',text:'The late fee is 2 rupees.',heading:'',segmentIds:[1]};
+ const execute=async value=>{
+  globalThis.fetch=async()=>Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(value)}]}}]});
+  return aiContext.run({owner:'repair-test',feature:'summary'},()=>repairSummaryPart(part,source,'English',['Correct the fee.'],{claimIds:['point:1'],omissions:false}));
+ };
+ const fixed=await execute({patches:[patch],additions:[]});
+ assert.equal(fixed.title,part.title);assert.equal(fixed.overview,part.overview);assert.deepEqual(fixed.keyPoints[0],part.keyPoints[0]);
+ assert.equal(fixed.keyPoints[1].text,patch.text);assert.equal(part.keyPoints[1].text,'Fee is 20 rupees.');assert.equal(fixed.sourceChecked,undefined);
+ await assert.rejects(execute({patches:[{...patch,claimId:'point:0'}],additions:[]}),{code:'QUALITY_EVIDENCE'});
+ await assert.rejects(execute({patches:[{...patch,segmentIds:[999]}],additions:[]}),{code:'INVALID_CITATION'});
+ await assert.rejects(execute({patches:[patch],additions:[{text:'Invented addition',segmentIds:[0]}]}),{code:'INVALID_AI_OUTPUT'});
+});
+
+test('queued targeted repair is checkpointed and never published before its independent review',async()=>{
+ env.SUMMARY_LARGE_BATCHES='true'; const owner='targeted-queue',id=crypto.randomUUID();
+ const source=[{id:0,start:0,text:'Borrow for 14 days.'},{id:1,start:1,text:'The late fee is 2 rupees.'}];
+ const part={title:'Library',overview:'Borrowing rules.',keyPoints:[{text:'Borrow for 14 days.',segmentIds:[0]},{text:'Late fee is 20 rupees.',segmentIds:[1]}],chapters:[]};
+ await env.DB.prepare('INSERT INTO notes(id,owner,title,source,transcript,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').bind(id,owner,'Test','text',JSON.stringify(source),Date.now(),Date.now()).run();
+ let calls=0;
+ globalThis.fetch=async(url,init)=>{
+  calls++;const system=JSON.parse(init.body).systemInstruction.parts[0].text;
+  let value=part;
+  if(calls===3){assert.match(system,/Repair rejected claims only/);value={patches:[{claimId:'point:1',text:'Late fee is 2 rupees.',heading:'',segmentIds:[1]}],additions:[]};}
+  else if(calls===2||calls===4){value={claims:summaryClaims(part).filter(c=>calls!==4||c.id==='point:1').map(c=>({claimId:c.id,sourceIds:[c.id==='point:1'?'1:0':'0:0'],reason:calls===2&&c.id==='point:1'?'Fee must be 2 rupees.':'',verdict:calls===2&&c.id==='point:1'?'unsupported':'supported'})),omissions:[]};}
+  return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(value)}]}}]});
+ };
+ const job=await enqueueSummary(owner,{id,language:'English',detail:'balanced'});
+ await runNextJob(owner,job.id);await runNextJob(owner,job.id);
+ assert.equal((await findJob(owner,job.id)).error_code,'QUALITY_REVIEW');
+ await env.DB.prepare('UPDATE ai_jobs SET next_at=0 WHERE id=?').bind(job.id).run();
+ await runNextJob(owner,job.id);
+ assert.equal((await findJob(owner,job.id)).completed_parts,0);
+ const staged=JSON.parse((await env.DB.prepare("SELECT content FROM artifacts WHERE note_id=? AND kind='__summary_progress'").bind(id).first()).content);
+ assert.equal(staged.draft.keyPoints[0].text,part.keyPoints[0].text);assert.equal(staged.draft.keyPoints[1].text,'Late fee is 2 rupees.');
+ await runNextJob(owner,job.id);assert.equal((await findJob(owner,job.id)).state,'completed');assert.equal(calls,4);
+});
+
+test('repeated large-batch review failures preserve the checked prefix and split only remaining source',async()=>{
+ const owner='adaptive-queue',id=crypto.randomUUID();
+ const source=Array.from({length:12},(_,i)=>({id:i,start:i,text:'The square is blue. '.repeat(500)}));
+ const chunks=summarySourceChunks(source,'balanced',4);assert.ok(chunks.length>1);
+ await env.DB.prepare('INSERT INTO notes(id,owner,title,source,transcript,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').bind(id,owner,'Test','text',JSON.stringify(source),Date.now(),Date.now()).run();
+ let calls=0,current;
+ globalThis.fetch=async()=>{
+  calls++;const first=calls<=2?chunks[0][0].id:chunks[1][0].id;
+  current={title:'Square',overview:'The square is blue.',keyPoints:[{text:'The square is blue.',segmentIds:[first]}],chapters:[]};
+  let value=current;
+  if(calls===5)value={patches:[{claimId:'point:0',text:'The square is blue.',heading:'',segmentIds:[first]}],additions:[]};
+  if([2,4,6].includes(calls))value={claims:summaryClaims(current).filter(c=>calls!==6||c.id==='point:0').map(c=>({claimId:c.id,sourceIds:['0:0'],reason:calls>2&&c.id==='point:0'?'Unresolved ambiguity.':'',verdict:calls>2&&c.id==='point:0'?'unsupported':'supported'})),omissions:[]};
+  return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(value)}]}}]});
+ };
+ try{
+  env.SUMMARY_LARGE_BATCHES='true';const job=await enqueueSummary(owner,{id,language:'English',detail:'balanced'});
+  await runNextJob(owner,job.id);await runNextJob(owner,job.id);
+  const read=async()=>JSON.parse((await env.DB.prepare("SELECT content FROM artifacts WHERE note_id=? AND kind='__summary_progress'").bind(id).first()).content);
+  const prefix=(await read()).parts;
+  for(let i=0;i<4;i++)await runNextJob(owner,job.id);
+  const progress=await read();assert.equal(progress.chunkVersion,3);assert.deepEqual(progress.legacyPrefix,{version:4,count:1});assert.deepEqual(progress.parts,prefix);
+  assert.equal(progress.draft,undefined);assert.equal(progress.repairPlan,undefined);
+  assert.equal(progress.totalParts,1+summarySourceChunks(chunks.slice(1).flat(),'balanced',3).length);
+  const state=await findJob(owner,job.id);assert.equal(state.error_code,'WORKER_YIELD');assert.equal(state.state,'retry');assert.equal(state.failures,1);
+ }finally{delete env.SUMMARY_LARGE_BATCHES;}
+});
+
+test('accepted review evidence is reused only for unchanged claims and identical source context',async()=>{
+ const part={title:'Library',overview:'Borrowing rules.',keyPoints:[{text:'Borrow for 14 days.',segmentIds:[0]},{text:'Fee is 20 rupees.',segmentIds:[1]}],chapters:[]};
+ const source=[{id:0,start:0,text:'Library borrowing rules: borrow for 14 days.'},{id:1,start:1,text:'Fee is 2 rupees.'}];
+ let reject=true,requested=[];
+ globalThis.fetch=async(url,init)=>{
+  const content=JSON.parse(init.body).contents[0].parts[0].text;
+  const start=content.indexOf('{'),end=content.indexOf('\nCURRENT SOURCE:');const request=JSON.parse(content.slice(start,end));requested=request.claims.map(c=>c.id);
+  return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify({claims:request.claims.map(c=>({claimId:c.id,sourceIds:[c.id==='point:1'?'1:0':'0:0'],reason:reject&&c.id==='point:1'?'Wrong fee.':'',verdict:reject&&c.id==='point:1'?'unsupported':'supported'})),omissions:[]})}]}}]});
+ };
+ const run=(value,src,cache,boundary='')=>aiContext.run({owner:'review-cache',feature:'summary'},()=>checkSummaryPart(value,src,boundary,'balanced',undefined,cache));
+ let cache;await assert.rejects(run(part,source),e=>{cache=e.accepted;return e.code==='QUALITY_REVIEW'&&cache.claims.length===3;});
+ reject=false;
+ const corrected={...part,keyPoints:[part.keyPoints[0],{text:'Fee is 2 rupees.',segmentIds:[1]}]};
+ assert.equal((await run(corrected,source,cache)).sourceChecked,true);assert.deepEqual(requested,['point:1']);
+ await run({...corrected,title:'Changed title'},source,cache);assert.deepEqual(requested,['title','point:1']);
+ await run(corrected,[{...source[0],text:source[0].text+' New source detail.'},source[1]],cache);assert.equal(requested.length,4);
+ await run(corrected,source,cache,'Changed boundary context');assert.equal(requested.length,4);
+});
+
+test('production summary trial is database-role gated and rollback overrides all flags',async()=>{
+ env.VERCEL='1';env.SUMMARY_LARGE_BATCHES='true';
+ const admin='12345678-1234-1234-1234-123456789abc';
+ assert.equal(await summaryTrialEnabled(admin),false);
+ env.SUMMARY_PIPELINE_TRIAL='admins';
+ assert.equal(await summaryTrialEnabled(admin),true);
+ await aiContext.run({owner:'ordinary',role:'superuser'},async()=>assert.equal(await summaryTrialEnabled('ordinary'),false));
+ await env.DB.prepare("UPDATE user_access SET role='user' WHERE owner=?").bind(admin).run();
+ assert.equal(await summaryTrialEnabled(admin),false);
+ await env.DB.prepare("INSERT INTO user_access(owner,role,suspended,revision,updated_by,updated_at) VALUES('trial-superuser','superuser',0,'trial','test',0)").run();
+ assert.equal(await summaryTrialEnabled('trial-superuser'),true);
+ env.SUMMARY_PIPELINE_TRIAL='off';assert.equal(await summaryTrialEnabled(admin),false);
+});
+
+test('trial rollback discards unchecked large drafts and retains a resumable smaller plan',async()=>{
+ const owner='rollback-plan',id=crypto.randomUUID(),source=[{id:0,start:0,text:'The square is blue. '.repeat(1900)}];
+ await env.DB.prepare('INSERT INTO notes(id,owner,title,source,transcript,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').bind(id,owner,'Test','text',JSON.stringify(source),Date.now(),Date.now()).run();
+ let calls=0;globalThis.fetch=async(url,init)=>{calls++;assert.ok(!JSON.parse(init.body).systemInstruction.parts[0].text.includes('skeptical source reviewer'));return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify({title:'Square',overview:'The square is blue.',keyPoints:[{text:'The square is blue.',segmentIds:[0]}],chapters:[]})}]}}]});};
+ env.SUMMARY_LARGE_BATCHES='true';const job=await enqueueSummary(owner,{id,language:'English',detail:'balanced'});await runNextJob(owner,job.id);
+ env.VERCEL='1';env.SUMMARY_PIPELINE_TRIAL='off';await runNextJob(owner,job.id);
+ const progress=JSON.parse((await env.DB.prepare("SELECT content FROM artifacts WHERE note_id=? AND kind='__summary_progress'").bind(id).first()).content);
+ assert.equal(progress.chunkVersion,3);assert.deepEqual(progress.legacyPrefix,{version:4,count:0});assert.ok(progress.totalParts>1);assert.equal(progress.parts.length,0);assert.equal(calls,2);
 });

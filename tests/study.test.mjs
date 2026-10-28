@@ -217,3 +217,17 @@ test('long multilingual tool context is bounded, source-exact and includes the e
  assert.ok(next.every(s=>!selected.some(old=>old.id===s.id)));
  const small=[{id:8,start:0,text:'A short source.'}];assert.equal(studyToolContext(small),small);
 });
+
+test('large batches preserve every source character, IDs and Unicode within bounded budgets',()=>{
+ for(const text of ['Study fact with context. '.repeat(2000),'?????? ???? ?? ?????????? ???????? '.repeat(2000),'?? ???? ???? '.repeat(3000)]) {
+  const source=[{id:9,start:0,text},{id:42,start:99,text:'Final exception: approval is still pending.'}];
+  for(const detail of ['balanced','detailed']) {
+   const before=summarySourceChunks(source,detail,3),after=summarySourceChunks(source,detail,4);
+   assert.ok(after.length<before.length);
+   assert.equal(after.flat().map(s=>s.text).join(''),source.map(s=>s.text).join(''));
+   for(const s of source)assert.equal(after.flat().filter(p=>p.id===s.id).map(p=>p.text).join(''),s.text);
+   for(const chunk of after)assert.ok(sourceTokenEstimate(chunk.map(s=>s.text).join(''))<=(detail==='detailed'?7000:10500));
+   assert.equal(after.at(-1).at(-1).id,42);
+  }
+ }
+});

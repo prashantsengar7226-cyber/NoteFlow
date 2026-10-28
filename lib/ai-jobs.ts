@@ -6,6 +6,8 @@ import { db, ownedNote } from './server';
 import { nextReset } from './plans';
 import { credential, withOwnerAI, withAILease } from './personal-ai';
 import { summaryStep } from './summary-progress';
+import { SummaryQualityError } from './summary-quality';
+import { summaryTrialEnabled } from './summary-trial';
 import { aiContext } from './ai-context';
 import { withAIFeature, settleOperation } from './ai-policy';
 import { activeAccess, elevated } from './access';
@@ -137,14 +139,18 @@ export async function runNextJob(owner?: string, id?: string, deadline?: number)
     const waiting = ['WORKER_YIELD','WEEKLY_LIMIT','VERTEX_CAP','DAILY_LIMIT','PROVIDER_LIMIT','PROVIDER_COOLDOWN','AI_BUSY','SUMMARY_IN_PROGRESS'].includes(code);
     const retryable = waiting || ['TIMEOUT','PROVIDER_BUSY','PROVIDER_NETWORK','PROVIDER_UNAVAILABLE','UPSTREAM_ERROR','PROVIDER_ERROR','NETWORK_ERROR','INVALID_AI_OUTPUT','INVALID_CITATION','OUTPUT_LIMIT','QUALITY_REVIEW','QUALITY_EVIDENCE','INTERNAL'].includes(code);
     const failures = job.failures + (waiting ? 0 : 1);
+    const targetedRepair = error instanceof SummaryQualityError && !!error.repair && await summaryTrialEnabled(job.owner).catch(()=>false);
     const delay = error instanceof AppError && error.retryAfterSeconds ? error.retryAfterSeconds * 1000 : Math.min(900000, 60000 * 2 ** failures);
     // A content correction is not a provider outage. Repair promptly within
     // the same three-failure budget; retain backoff for transport/quota errors.
-    const nextAt = code === 'DAILY_LIMIT' ? nextReset() + 1000 : Date.now() +
+    const nextAt = code === 'WORKER_YIELD' || targetedRepair ? Date.now() : code === 'DAILY_LIMIT' ? nextReset() + 1000 : Date.now() +
       (code === 'QUALITY_REVIEW' ? Math.max(15000, error instanceof AppError && error.retryAfterSeconds ? error.retryAfterSeconds * 1000 : 0) : Math.max(30000, delay));
     await update(retryable && failures < 3 ? 'retry' : 'failed', code, nextAt, failures);
     if (!(retryable && failures < 3)) await settleOperation(job.owner,job.id,false);
     console.warn(JSON.stringify({event:'summary_queue_step',state:retryable && failures < 3 ? 'retry':'failed',code}));
+    // A bounded content patch can use the current worker's remaining budget.
+    // Quota, network and provider errors still exit and retain their backoff.
+    if(targetedRepair && failures < 3) return true;
   }
 }
 
@@ -152,9 +158,13 @@ export async function runNextJob(owner?: string, id?: string, deadline?: number)
  * draft/review. Each step still acquires its own lease and checkpoints its result. */
 export async function drainJobs(owner?: string, id?: string, budgetMs = 140000) {
   const deadline = Date.now() + Math.min(140000, Math.max(0, budgetMs));
+  const trial=owner?await summaryTrialEnabled(owner):false;
   let steps = 0;
-  while (steps < 12 && deadline - Date.now() >= 65000) {
-    if (!await runNextJob(owner, id, deadline)) break;
+  // Keep five seconds for persistence/lease release. Provider calls inherit
+  // the remaining deadline; never launch with less than 30 seconds available.
+  // The wall-clock budget, not six parts, is the primary work limit.
+  while (steps < (trial?64:12) && deadline - Date.now() >= (trial?35000:65000)) {
+    if (!await runNextJob(owner, id, deadline - (trial?5000:0))) break;
     steps++;
   }
   return steps;

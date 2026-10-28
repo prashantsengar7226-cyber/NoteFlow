@@ -86,18 +86,18 @@ export function studyToolContext(segments: Segment[], items: StudyItem[] = [], b
   return selected;
 }
 
-function multilingualChunks(segments: Segment[], characterBudget: number): Segment[][] {
+function multilingualChunks(segments: Segment[], characterBudget: number, tokenBudget = 3500): Segment[][] {
   const chunks: Segment[][] = [];
   let chunk: Segment[] = [], characters = 0, cost = 0;
   const flush = () => { if (chunk.length) chunks.push(chunk); chunk = []; characters = 0; cost = 0; };
   for (const segment of segments) {
     const segmentCost = sourceTokenEstimate(segment.text);
-    if (chunk.length && segment.text.length <= characterBudget && segmentCost <= 3500 &&
-        (characters + segment.text.length > characterBudget || cost + segmentCost > 3500)) flush();
+    if (chunk.length && segment.text.length <= characterBudget && segmentCost <= tokenBudget &&
+        (characters + segment.text.length > characterBudget || cost + segmentCost > tokenBudget)) flush();
     let text = '';
     for (const char of segment.text) {
       const weight = char.codePointAt(0)! < 128 ? 0.25 : 1;
-      if (characters + char.length > characterBudget || cost + weight > 3500) {
+      if (characters + char.length > characterBudget || cost + weight > tokenBudget) {
         if (text) chunk.push({ ...segment, text });
         text = ''; flush();
       }
@@ -110,6 +110,7 @@ function multilingualChunks(segments: Segment[], characterBudget: number): Segme
 }
 
 export function summarySourceChunks(segments: Segment[], detail: string, version = 3) {
+  if (version === 4) return multilingualChunks(segments, detail === 'detailed' ? 28000 : 42000, detail === 'detailed' ? 7000 : 10500);
   if (version >= 3) return multilingualChunks(segments, detail === 'detailed' ? 8000 : 16000);
   const large = segments.reduce((n, segment) => n + segment.text.length, 0) > 60000;
   return summaryChunks(

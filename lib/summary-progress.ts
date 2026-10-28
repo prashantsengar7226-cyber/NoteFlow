@@ -1,7 +1,7 @@
 import { AppError, type Segment, type SummaryProgress } from './core';
 import { usesPersonalAI, aiContext } from './ai-context';
 import { featureRouting, reserveOperation, settleOperation } from './ai-policy';
-import { checkSummaryPart, SummaryQualityError, SummaryEvidenceError } from './summary-quality';
+import { checkSummaryPart, repairSummaryPart, SummaryQualityError, SummaryEvidenceError, type AcceptedReview } from './summary-quality';
 import {
   db,
   consumeService,
@@ -14,6 +14,8 @@ import {
   type SummaryPart,
 } from './server';
 import { summarySourceChunks, summaryBoundaryContext } from './study';
+import { summaryTrialEnabled } from './summary-trial';
+import { env } from './platform';
 
 const KIND = '__summary_progress';
 type Progress = {
@@ -30,6 +32,8 @@ type Progress = {
   draft?: SummaryPart;
   rejectedDraft?: SummaryPart;
   reviewIssues?: string[];
+  repairPlan?: {claimIds:string[];omissions:boolean};
+  acceptedReview?: AcceptedReview;
   evidenceIssues?: string[];
 };
 type Input = { language: string; detail: string; runId?: string; completedParts?: number; qualityCheck?: boolean };
@@ -120,8 +124,19 @@ export async function summaryStep(note: NoteRow, owner: string, segments: Segmen
     .bind(note.id, KIND)
     .first<{ content: string }>();
   const previous = row ? (JSON.parse(row.content) as Progress) : null;
+  const trial = await summaryTrialEnabled(owner);
+  const settings=env as unknown as Record<string,string|undefined>;
+  if(!trial && (settings.VERCEL || settings.SUMMARY_PIPELINE_TRIAL==='off') && previous?.chunkVersion===4 && !previous.legacyPrefix && previous.parts.length<previous.totalParts){
+    previous.legacyPrefix={version:4,count:previous.parts.length};previous.chunkVersion=3;
+    previous.draft=undefined;previous.rejectedDraft=undefined;previous.repairPlan=undefined;previous.acceptedReview=undefined;
+    previous.reviewIssues=undefined;previous.evidenceIssues=undefined;
+    previous.totalParts=progressChunks(segments,previous).length;
+  }
   const resuming = previous && previous.language === input.language && previous.detail === input.detail && previous.parts.length < previous.totalParts;
-  const chunkVersion = resuming ? previous.chunkVersion ?? 1 : 3;
+  // Persist the plan version: toggling the experiment must not repartition a
+  // running task or invalidate its saved draft/citations.
+  const chunkVersion = resuming ? previous.chunkVersion ?? 1 :
+    trial ? 4 : 3;
   let chunks = resuming ? progressChunks(segments, previous) : summarySourceChunks(segments, input.detail, chunkVersion);
   const response = (progress: Progress) => {
     const complete = progress.parts.length === progress.totalParts;
@@ -219,14 +234,16 @@ export async function summaryStep(note: NoteRow, owner: string, segments: Segmen
   try {
     await reserveOperation(owner, aiContext.getStore()?.operationId ?? progress.runId, 'summary');
     if (!progress.draft) refund = await consumeService(owner, 'ai');
-    let part = progress.draft ?? await generateSummaryPart(
+    let part = progress.draft ?? (trial && progress.rejectedDraft && progress.repairPlan
+      ? await repairSummaryPart(progress.rejectedDraft,chunks[progress.parts.length],input.language,progress.reviewIssues??[],progress.repairPlan)
+      : await generateSummaryPart(
       chunks[progress.parts.length],
       input.language,
       input.detail,
       progress.parts.length,
       chunks.length,
-      { source: segments, boundary: summaryBoundaryContext(chunks, progress.parts.length), reviewIssues: input.qualityCheck ? progress.reviewIssues : undefined, rejectedDraft: input.qualityCheck ? progress.rejectedDraft : undefined },
-    );
+      { compact: chunkVersion === 4, source: segments, boundary: summaryBoundaryContext(chunks, progress.parts.length), reviewIssues: input.qualityCheck ? progress.reviewIssues : undefined, rejectedDraft: input.qualityCheck ? progress.rejectedDraft : undefined },
+    ));
     if (input.qualityCheck && !progress.draft) {
       const staged = { ...progress, draft: part, evidenceIssues: undefined, error: null, errorCode: undefined, lockUntil: 0 };
       const saved = await db().prepare('UPDATE artifacts SET content=? WHERE note_id=? AND kind=? AND content=? RETURNING content')
@@ -234,8 +251,8 @@ export async function summaryStep(note: NoteRow, owner: string, segments: Segmen
       if (!saved) throw conflict();
       return response(staged);
     }
-    if (input.qualityCheck) part = await checkSummaryPart(part, chunks[progress.parts.length], summaryBoundaryContext(chunks, progress.parts.length), input.detail, progress.evidenceIssues);
-    const next = { ...progress, draft: undefined, rejectedDraft: undefined, reviewIssues: undefined, evidenceIssues: undefined, parts: [...progress.parts, part], error: null, errorCode: undefined, lockUntil: 0 };
+    if (input.qualityCheck) part = await checkSummaryPart(part, chunks[progress.parts.length], summaryBoundaryContext(chunks, progress.parts.length), input.detail, progress.evidenceIssues,trial?progress.acceptedReview:undefined);
+    const next = { ...progress, draft: undefined, rejectedDraft: undefined, repairPlan: undefined, acceptedReview:undefined, reviewIssues: undefined, evidenceIssues: undefined, parts: [...progress.parts, part], error: null, errorCode: undefined, lockUntil: 0 };
     const serialized = JSON.stringify(next);
     // Leave room for the source and annotations in the note's database row.
     const summary = mergeSummaryParts(next.parts, segments, input.language);
@@ -271,6 +288,19 @@ export async function summaryStep(note: NoteRow, owner: string, segments: Segmen
     await refund?.().catch(() =>
       console.error(JSON.stringify({ event: 'quota_refund_failed', service: 'ai' })),
     );
+    // A dense large batch must not trap the whole job in repeated corrections.
+    // Preserve the checked prefix verbatim and repartition only unchecked text.
+    // This one-way fallback is bounded: version 3 never splits again here.
+    if(chunkVersion===4 && !progress.legacyPrefix && progress.reviewIssues?.length && error instanceof SummaryQualityError){
+      const smaller:Progress={...progress,chunkVersion:3,legacyPrefix:{version:4,count:progress.parts.length},
+        draft:undefined,rejectedDraft:undefined,repairPlan:undefined,acceptedReview:undefined,reviewIssues:undefined,evidenceIssues:undefined,
+        lockUntil:0,error:null,errorCode:undefined};
+      smaller.totalParts=progressChunks(segments,smaller).length;
+      const saved=await db().prepare('UPDATE artifacts SET content=? WHERE note_id=? AND kind=? AND content=? RETURNING content')
+        .bind(JSON.stringify(smaller),note.id,KIND,reserved).first();
+      if(!saved)throw conflict();
+      throw new AppError(503,'WORKER_YIELD','Saved parts are safe. Continuing the remaining source in smaller batches.');
+    }
     await db()
       .prepare('UPDATE artifacts SET content=? WHERE note_id=? AND kind=? AND content=?')
       .bind(
@@ -279,6 +309,8 @@ export async function summaryStep(note: NoteRow, owner: string, segments: Segmen
           draft: error instanceof AppError && error.code === 'QUALITY_REVIEW' ? undefined : progress.draft,
           rejectedDraft: error instanceof SummaryQualityError ? progress.draft : progress.rejectedDraft,
           reviewIssues: error instanceof SummaryQualityError ? error.issues : progress.reviewIssues,
+          repairPlan: trial ? error instanceof SummaryQualityError ? error.repair : progress.repairPlan : undefined,
+          acceptedReview: trial ? error instanceof SummaryQualityError ? error.accepted : progress.acceptedReview : undefined,
           evidenceIssues: error instanceof SummaryEvidenceError ? error.issues : error instanceof SummaryQualityError ? undefined : progress.evidenceIssues,
           lockUntil: 0,
           errorCode: error instanceof AppError ? error.code : 'INTERNAL',
