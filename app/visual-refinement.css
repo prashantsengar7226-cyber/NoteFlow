@@ -29,3 +29,12 @@
 @media(max-width:700px) { .note-reader .revision-topic h3 { font-size:17px; } .note-reader .revision-facts li p { font-size:15px; } }
 @media(prefers-reduced-motion:reduce) { .note-card { transition:none; } .note-card:hover { transform:none; } }
 [data-motion="off"] .note-card { transition:none; transform:none; }
+
+.sidebar-toggle { display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; width:40px; height:40px; border:1px solid #dce3ed; border-radius:7px; color:#526176; background:#fff; cursor:pointer; }
+.sidebar-toggle:hover { background:#edf3ff; color:#1746c4; }
+.sidebar-toggle:focus-visible { outline:2px solid #245cf5; outline-offset:3px; }
+@media(min-width:761px) {
+  .app-shell.sidebar-collapsed > .sidebar { display:none; }
+  .app-shell.sidebar-collapsed > .main-shell { margin-left:0; }
+}
+@media(max-width:760px) { .app-shell .sidebar-toggle { display:none; } }

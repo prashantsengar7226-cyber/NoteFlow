@@ -9,6 +9,14 @@ export async function checkAdministration(a,b,base,dbUrl,results) {
   await db.execute({sql:"INSERT INTO user_access(owner,role,revision,updated_by,updated_at) VALUES(?,'superuser',?,'local-ui-test',?)",args:[root,crypto.randomUUID(),now]});
   await a.goto(base+'/');await a.getByRole('link',{name:'Superuser dashboard'}).click();
   await a.getByRole('heading',{name:'Overview',exact:true}).waitFor();
+  await a.getByRole('button',{name:'Collapse sidebar',exact:true}).click();
+  assert.equal(await a.locator('#admin-navigation').isVisible(),false);
+  await a.reload();
+  await a.getByRole('button',{name:'Expand sidebar',exact:true}).waitFor();
+  assert.equal(await a.locator('#admin-navigation').isVisible(),false);
+  await a.getByRole('button',{name:'Expand sidebar',exact:true}).click();
+  assert.equal(await a.locator('#admin-navigation').isVisible(),true);
+  results.push({check:'admin sidebar collapse and persisted reload can be reversed',pass:true});
   await a.getByRole('heading',{name:'Service connections'}).waitFor();
   await a.getByRole('img',{name:/Notes created over 7 days/}).waitFor();
   await a.getByLabel('Activity period').selectOption('30');

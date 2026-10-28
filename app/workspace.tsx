@@ -73,6 +73,7 @@ import { GenerationLoader, SummarySkeleton } from './generation-loader';
 import { InstallApp } from './install-app';
 import { LibrarySkeleton, MotionControl } from './workspace-motion';
 import { AccountPanel } from './account-panel';
+import {SidebarToggle, useSidebarPreference} from './sidebar-toggle';
 import type { PdfNote, PdfArtifacts, PdfScope } from '@/lib/pdf';
 type Note = {
   id: string;
@@ -219,6 +220,7 @@ function Empty({
   );
 }
 export default function Workspace({ name }: { name: string }) {
+  const sidebar = useSidebarPreference('workspace');
   const [notes, setNotes] = useState<ListNote[]>([]),
     [status, setStatus] = useState<Status | null>(null),
     [page, setPage] = useState('home'),
@@ -989,7 +991,7 @@ export default function Workspace({ name }: { name: string }) {
   const cards = artifacts.flashcards?.cards || [];
   const quiz = artifacts.quiz?.questions || [];
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${sidebar.collapsed ? 'sidebar-collapsed' : ''}`}>
       <a className="skip-link" href="#workspace-main">
         Skip to workspace
       </a>
@@ -1003,7 +1005,7 @@ export default function Workspace({ name }: { name: string }) {
       <aside
         id="workspace-navigation"
         ref={sidebarRef}
-        inert={narrowNavigation && !mobile}
+        inert={narrowNavigation ? !mobile : sidebar.collapsed}
         className={`sidebar ${mobile ? 'mobile-open' : ''}`}
       >
         <button className="brand" onClick={() => navigate('home')}>
@@ -1126,6 +1128,7 @@ export default function Workspace({ name }: { name: string }) {
       <div className="main-shell">
         <header className="topbar">
           <div className="breadcrumb">
+            <SidebarToggle collapsed={sidebar.collapsed} toggle={sidebar.toggle} controls="workspace-navigation"/>
             <button
               className="icon-button mobile-menu"
               onClick={() => setMobile(true)}

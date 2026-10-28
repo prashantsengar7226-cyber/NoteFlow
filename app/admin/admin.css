@@ -46,3 +46,8 @@
 @media(max-width:600px) { .admin-costs .admin-cost-metrics > div { padding:16px; } .admin-costs .admin-section { padding:16px; } }
 .admin-costs .admin-columns table { min-width:0; width:100%; }
 .admin-costs .admin-columns td code { overflow-wrap:anywhere; white-space:normal; }
+@media(min-width:761px) {
+  .admin-app.admin-sidebar-collapsed { grid-template-columns:minmax(0,1fr); }
+  .admin-sidebar-collapsed > .admin-rail { display:none; }
+}
+@media(max-width:760px) { .admin-app .sidebar-toggle { display:none; } }

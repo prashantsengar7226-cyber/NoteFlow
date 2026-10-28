@@ -55,6 +55,21 @@ try {
   }
   results.push({check:'two synthetic accounts reach real workspace via fixture auth',pass:true});
   const [a,b]=sessions;
+  await a.page.getByRole('button',{name:'Collapse sidebar',exact:true}).click();
+  assert.equal(await a.page.locator('#workspace-navigation').isVisible(),false);
+  await a.page.reload();
+  await a.page.getByRole('button',{name:'Expand sidebar',exact:true}).waitFor();
+  assert.equal(await a.page.locator('#workspace-navigation').isVisible(),false);
+  await a.page.setViewportSize({width:390,height:844});
+  await a.page.getByRole('button',{name:'Open navigation',exact:true}).click();
+  assert.equal(await a.page.locator('#workspace-navigation').isVisible(),true);
+  await a.page.keyboard.press('Escape');
+  await a.page.setViewportSize({width:1440,height:1000});
+  await a.page.getByRole('button',{name:'Expand sidebar',exact:true}).focus();
+  await a.page.keyboard.press('Enter');
+  assert.equal(await a.page.locator('#workspace-navigation').isVisible(),true);
+  results.push({check:'workspace sidebar collapses, persists reload, expands by keyboard; mobile drawer works with collapsed desktop preference',pass:true});
+
   // Preserve draft only in this tab and consume it once after authenticated entry.
   await a.page.goto(base+'/welcome');
   await a.page.getByRole('tab',{name:'Paste text',exact:true}).click();
