@@ -2722,6 +2722,7 @@ export default function Workspace({ name }: { name: string }) {
                       disabled={busy === 'open'}
                     >
                       <div className={`note-card-cover cover-${i % 4}`}>
+                        {n.source === 'YouTube' && n.video_id && /^[a-zA-Z0-9_-]{11}$/.test(n.video_id) ? <img className="note-source-thumbnail" src={`https://i.ytimg.com/vi/${n.video_id}/hqdefault.jpg`} alt="" loading="lazy" referrerPolicy="no-referrer" onError={e => {e.currentTarget.style.display = 'none';}} /> : null}
                         <div className="cover-pattern" />
                         {n.source === 'YouTube' ? (
                           <CirclePlay size={35} />

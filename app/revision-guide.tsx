@@ -54,7 +54,7 @@ export function RevisionGuide({ summary, segments, citations, partial }: {
           <h3 id={`${prefix}-${t.id}`} tabIndex={-1}><span className="revision-topic-number">{topics.indexOf(t)+1}</span>{t.title}</h3>
           <details open={recall ? undefined : true}>
             <summary>{recall ? 'Reveal notes and check your recall' : 'Topic notes'}{t.points.length > 0 ? ` · ${t.points.length} ${t.points.length === 1 ? 'key point' : 'key points'}` : ''}</summary>
-            {t.explanation && <div className="revision-explanation"><p>{t.explanation}</p><div className="citations">{citations(t.segmentIds)}</div></div>}
+            {t.explanation && (t.points.length ? <details className="revision-context" open={query ? t.explanation.toLocaleLowerCase().includes(query) : undefined}><summary>Read topic explanation</summary><div className="revision-explanation"><p>{t.explanation}</p><div className="citations">{citations(t.segmentIds)}</div></div></details> : <div className="revision-explanation"><p>{t.explanation}</p><div className="citations">{citations(t.segmentIds)}</div></div>)}
             {t.points.length > 0 && <ul className="revision-facts">{t.points.map((p, i) => <li key={i}><p>{p.text}</p><div className="citations">{citations(p.segmentIds)}</div></li>)}</ul>}
           </details>
         </section>)}

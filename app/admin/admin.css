@@ -27,3 +27,22 @@
 .admin-costs a{color:#1746c4;text-underline-offset:3px}
 .admin-costs .admin-setup-note a{display:inline-flex;align-items:center;gap:8px;min-height:44px}
 @media(max-width:760px){.admin-cost-metrics{grid-template-columns:1fr;gap:16px}.admin-cost-metrics>div{border-bottom:1px solid #e2e8f0;padding-bottom:16px}.admin-cost-metrics dd{font-size:26px}.admin-cost-token-line{gap:12px}.admin-cost-toolbar{align-items:stretch}.admin-cost-toolbar .admin-range{width:100%;margin-right:0}.admin-cost-toolbar button{flex:1}.admin-cost-chart text{font-size:22px}}
+
+/* Compact cost ledger: color highlights estimates, disclosure holds methodology. */
+.admin-costs .admin-cost-metrics { gap:0; margin:20px 0; background:#f3f6fc; border-radius:8px; overflow:hidden; }
+.admin-costs .admin-cost-metrics > div { padding:20px 24px; }
+.admin-costs .admin-cost-metrics > div:first-child { background:#245cf5; color:white; }
+.admin-costs .admin-cost-metrics > div:first-child dt { color:#e8efff; }
+.admin-costs .admin-cost-metrics dd { font-size:30px; letter-spacing:-.025em; font-variant-numeric:tabular-nums; margin:8px 0 0; }
+.admin-costs .admin-cost-metrics dt { font-size:12px; }
+.admin-costs .admin-cost-token-line { padding:12px 0; gap:22px; font-size:12px; font-variant-numeric:tabular-nums; }
+.admin-costs .admin-section { padding:22px; }
+.admin-costs .admin-section h2 { font-size:18px; letter-spacing:-.02em; }
+.admin-costs .admin-section p { font-size:12px; line-height:1.65; max-width:75ch; }
+.admin-costs .cost-method { border-top:1px solid #e2e8f0; padding-top:12px; margin-top:12px; }
+.admin-costs .cost-method summary { cursor:pointer; color:#365381; font-size:12px; padding:6px 0; }
+.admin-costs .cost-method summary:focus-visible { outline:2px solid #245cf5; outline-offset:3px; }
+.admin-costs .admin-empty-state { display:grid; place-content:center; min-height:150px; border:1px dashed #cbd5e1; border-radius:8px; background:#f8faff; text-align:center; }
+@media(max-width:600px) { .admin-costs .admin-cost-metrics > div { padding:16px; } .admin-costs .admin-section { padding:16px; } }
+.admin-costs .admin-columns table { min-width:0; width:100%; }
+.admin-costs .admin-columns td code { overflow-wrap:anywhere; white-space:normal; }
