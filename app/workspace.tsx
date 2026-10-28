@@ -834,7 +834,8 @@ export default function Workspace({ name }: { name: string }) {
       setError(
         `${created.length ? `${created.length} source(s) saved before the error. ` : ''}${(e as Error).message}`,
       );
-      await refresh().catch(() => {});
+      // Refresh is best-effort: a slow library request must not lock retry/close.
+      void refresh().catch(() => {});
     } finally {
       importRunning.current = false;
       setBusy('');

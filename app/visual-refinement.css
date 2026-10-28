@@ -38,3 +38,11 @@
   .app-shell.sidebar-collapsed > .main-shell { margin-left:0; }
 }
 @media(max-width:760px) { .app-shell .sidebar-toggle { display:none; } }
+
+/* Keep navigation and actions intact; only the import body scrolls. */
+.import-modal { max-height:calc(100dvh - 32px); overflow:hidden; }
+.import-modal > .modal-header,.import-modal > .import-tabs,.import-modal > .modal-footer { flex-shrink:0; }
+.import-modal > .modal-body { flex:1 1 auto; min-height:0; overflow-y:auto; overscroll-behavior:contain; }
+.import-modal > .import-tabs { overflow-x:auto; overflow-y:hidden; min-height:48px; }
+.import-modal > .import-tabs button { flex-shrink:0; min-height:48px; }
+@media(max-width:760px) { .import-modal { max-height:calc(100dvh - 24px); } }

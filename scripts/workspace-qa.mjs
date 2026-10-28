@@ -348,6 +348,33 @@ try {
     assert.equal((await api(a.page,'/api/notes')).data.notes.length,0);
   }
   results.push({check:'unsupported/oversized file replacements clear prior source and cannot import it',pass:true});
+  // A failed import must unlock controls without waiting for library refresh.
+  await fileInput.setInputFiles(goodFile);
+  let releaseLibrary;
+  const libraryGate=new Promise(resolve=>{releaseLibrary=resolve;});
+  const failedImport=async route=>{
+    if(route.request().method()==='POST')return route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'Temporary import failure'})});
+    if(new URL(route.request().url()).searchParams.has('requestId'))return route.fulfill({status:200,contentType:'application/json',body:'{"note":null}'});
+    await libraryGate;
+    return route.continue();
+  };
+  await a.page.route('**/api/notes*',failedImport);
+  try {
+    await a.page.getByRole('button',{name:'Create note',exact:true}).click();
+    await a.page.locator('.import-modal').getByText('We could not confirm the import yet.',{exact:false}).waitFor();
+    await a.page.waitForFunction(()=>!document.querySelector('[aria-label="Close import"]').disabled);
+    assert.equal(await a.page.getByRole('button',{name:'Create note',exact:true}).isEnabled(),true);
+    for(const viewport of [{width:1280,height:600},{width:390,height:664}]) {
+      await a.page.setViewportSize(viewport);
+      const tabs=await a.page.locator('.import-tabs').boundingBox();
+      assert.ok(tabs.height>=48,'source tabs must not collapse in short dialogs');
+      const footer=await a.page.locator('.import-modal .modal-footer').boundingBox();
+      assert.ok(footer.y+footer.height<=viewport.height,'actions remain inside viewport');
+      await a.page.screenshot({path:'audit/import-recovery-'+viewport.width+'.png'});
+    }
+  } finally {releaseLibrary();await a.page.unroute('**/api/notes*',failedImport);}
+  await a.page.setViewportSize({width:1440,height:1000});
+  results.push({check:'unconfirmed import releases retry and close despite stalled library refresh; tabs/actions fit short desktop and mobile',pass:true});
   // Commit a real local import, then deliberately truncate only its HTTP response.
   // The browser must recover the saved note and continue its summary with one POST.
   await fileInput.setInputFiles(goodFile);
