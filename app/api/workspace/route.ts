@@ -22,7 +22,7 @@ export async function GET(r: Request) {
       role: access.role,
       unlimited: elevated(access.role),
       summaryConnection: connection.mode === 'personal' ? { provider: 'Personal AI', model: c.model }
-        : vertex ? { provider: 'Vertex AI · admin', model: vertexConfig().model } : { provider: 'Free AI', model: c.model },
+        : vertex ? { provider: 'Vertex AI · admin', model: vertexConfig().model } : { provider: 'Gemini · free tier', model: c.model },
       ai: !!c.aiKey || vertex,
       featureRouting: featureRouting(),
       weeklyAI: featureRouting() ? await weeklyUsage(owner) : null,

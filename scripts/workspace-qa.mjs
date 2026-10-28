@@ -22,7 +22,7 @@ for(const name of (await readdir('drizzle')).filter(x=>x.endsWith('.sql')).sort(
   await client.batch(sql.split('--> statement-breakpoint').map(x=>x.trim()).filter(Boolean),'write');
 }
 client.close();
-const env={...process.env,NOTEFLOW_LOCAL_QA:'isolated-fixtures',TURSO_DATABASE_URL:dbUrl,TURSO_AUTH_TOKEN:'',AI_PROVIDER:'router',GEMINI_API_KEY:'',GROQ_API_KEY:'',OPENROUTER_API_KEY:'',SUPADATA_API_KEY:'',RAZORPAY_KEY_ID:'',RAZORPAY_KEY_SECRET:'',RAZORPAY_WEBHOOK_SECRET:'',BILLING_ENABLED:'false',MONETIZATION_MODE:'free_launch'};
+const env={...process.env,NOTEFLOW_LOCAL_QA:'isolated-fixtures',TURSO_DATABASE_URL:dbUrl,TURSO_AUTH_TOKEN:'',AI_PROVIDER:'router',GEMINI_API_KEY:'',GEMINI_FREE_API_KEY:'',GEMINI_FREE_TIER_CONFIRMED:'false',CLOUD_BILLING_EXPORT_TABLE:'',CLOUD_BILLING_SERVICE_ACCOUNT_JSON:'',GROQ_API_KEY:'',OPENROUTER_API_KEY:'',SUPADATA_API_KEY:'',RAZORPAY_KEY_ID:'',RAZORPAY_KEY_SECRET:'',RAZORPAY_WEBHOOK_SECRET:'',BILLING_ENABLED:'false',MONETIZATION_MODE:'free_launch'};
 env.BYOK_ENCRYPTION_KEY=randomBytes(32).toString('base64');
 env.QUEUE_WORKER_SECRET=randomBytes(32).toString('hex');
 env.QUEUE_SCHEDULER_ENABLED='false';

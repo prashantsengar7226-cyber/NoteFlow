@@ -10,6 +10,7 @@ import {generateKeyPairSync} from 'node:crypto';
 import {z} from 'zod';
 import {enqueueSummary,runNextJob,drainJobs,findJob,cancelJob} from '../.test-runtime/ai-jobs.mjs';
 import {summaryClaims,evidenceCatalog,resolveEvidence,validateReview,alignReviewedCitations} from '../.test-runtime/summary-quality.mjs';
+import {summarySourceChunks} from '../.test-runtime/study.mjs';
 const originalFetch=globalThis.fetch;
 test('paid boundary rejects anonymous, regular, small-tool and personal-key callers without fetching',async()=>{
   env.AI_FEATURE_ROUTING='true';
@@ -21,7 +22,7 @@ test('paid boundary rejects anonymous, regular, small-tool and personal-key call
     await aiContext.run(scope,async()=>{
       assert.equal(usesVertex(),false);
       await assert.rejects(vertexGenerate({},1000),e=>e.code==='VERTEX_ADMIN_ONLY');
-      if(!scope.candidate)assert.deepEqual(config().candidates.map(c=>c.provider),['openrouter']);
+      if(!scope.candidate)assert.deepEqual(config().candidates.map(c=>c.provider),['gemini']);
     });
   }
   assert.equal(calls,0);
@@ -34,7 +35,7 @@ beforeEach(async()=>{
   await env.DB.prepare('DELETE FROM vertex_budget').run();
   env.AI_FEATURE_ROUTING='true';env.AI_PROVIDER='router';env.AI_PROVIDER_ORDER='gemini,groq,openrouter';
   env.GEMINI_API_KEY='not-free';env.GROQ_API_KEY='not-free';env.OPENROUTER_API_KEY='free-fixture';env.OPENROUTER_MODEL='openrouter/free';
-  env.VERTEX_ENABLED='false';env.AI_ADMIN_USER_IDS='';
+  env.VERTEX_ENABLED='false';env.AI_ADMIN_USER_IDS='';env.GEMINI_FREE_API_KEY='gemini-free-fixture';env.GEMINI_FREE_TIER_CONFIRMED='true';
 });
 afterEach(()=>{globalThis.fetch=originalFetch;});
 
@@ -47,19 +48,18 @@ test('regular workspace and queued revision review stay free even with Vertex co
   for(const feature of ['summary','insights','quiz','flashcards','mindmap','slides','translation','chat']) {
     await aiContext.run({owner,feature},async()=>{
       assert.equal(usesVertex(),false);
-      assert.equal(config().candidates[0].freeOnly,true);
+      assert.equal(config().candidates[0].key,'gemini-free-fixture');assert.equal(config().candidates[0].fallbackModel,undefined);
     });
   }
   const status=await context.run(owner,()=>workspace.GET(new Request('https://test.example/api/workspace')));
-  const data=await status.json();assert.equal(data.vertex,false);assert.equal(data.summaryConnection.provider,'Free AI');assert.equal(data.dailyLimits.ai,null);
+  const data=await status.json();assert.equal(data.vertex,false);assert.equal(data.summaryConnection.provider,'Gemini · free tier');assert.equal(data.dailyLimits.ai,null);
   let calls=0;
   globalThis.fetch=async(url,init)=>{
-    assert.equal(url,'https://openrouter.ai/api/v1/chat/completions');calls++;
+    assert.equal(url,'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent');assert.equal(init.headers['x-goog-api-key'],'gemini-free-fixture');calls++;
     const request=JSON.parse(init.body);
-    assert.deepEqual(request.provider.max_price,{prompt:0,completion:0,request:0});
-    assert.equal(request.provider.sort,'throughput');assert.equal(request.reasoning.enabled,false);
+    assert.equal(request.generationConfig.thinkingConfig.thinkingLevel,'low');
     const value=calls===1?part:{claims:summaryClaims(part).map(c=>({claimId:c.id,sourceIds:['0:0'],reason:'',verdict:'supported'})),omissions:[]};
-    return Response.json({model:'synthetic/free-model:free',choices:[{finish_reason:'stop',message:{content:JSON.stringify(value)}}]});
+    return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(value)}]}}]});
   };
   const job=await enqueueSummary(owner,{id,language:'English',detail:'detailed'});
   await runNextJob(owner,job.id);
@@ -117,9 +117,9 @@ test('database admin role bypasses weekly allowance; personal keys and small fea
 });
 test('small feature calls have no daily user cap and cannot route to Vertex or paid shared models',async()=>{
   for(let i=0;i<150;i++)await consumeService('alice','ai');
-  assert.deepEqual(config().candidates.map(c=>c.provider),['openrouter']);
-  assert.equal(config().candidates[0].freeOnly,true);
-  env.OPENROUTER_MODEL='paid/model';assert.equal(config().candidates.length,0);
+  assert.deepEqual(config().candidates.map(c=>c.provider),['gemini']);
+  assert.equal(config().candidates[0].key,'gemini-free-fixture');assert.equal(config().candidates[0].fallbackModel,undefined);
+  env.GEMINI_FREE_TIER_CONFIRMED='false';assert.equal(config().candidates.length,0);
   await aiContext.run({owner:'alice'},()=>withAIFeature('summary',async()=>{
     assert.equal(config().candidates.length,0);
     await assert.rejects(ai('test','test',z.object({ok:z.boolean()}),[]),e=>e.code==='AI_NOT_CONFIGURED');
@@ -187,9 +187,31 @@ test('one worker invocation drafts and reviews a free summary without a cron del
  const owner='burst-fixture',id=crypto.randomUUID();
  const part={title:'Square',overview:'The square is blue.',keyPoints:[{text:'The square is blue.',segmentIds:[0]}],chapters:[]};
  await env.DB.prepare('INSERT INTO notes(id,owner,title,source,transcript,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').bind(id,owner,'Test','text',JSON.stringify([{id:0,start:0,text:'The square is blue.'}]),Date.now(),Date.now()).run();
- let calls=0;globalThis.fetch=async()=>{calls++;const value=calls===1?part:{claims:summaryClaims(part).map(c=>({claimId:c.id,sourceIds:['0:0'],reason:'',verdict:'supported'})),omissions:[]};return Response.json({model:'synthetic:free',choices:[{finish_reason:'stop',message:{content:JSON.stringify(value)}}]});};
+ let calls=0;globalThis.fetch=async()=>{calls++;const value=calls===1?part:{claims:summaryClaims(part).map(c=>({claimId:c.id,sourceIds:['0:0'],reason:'',verdict:'supported'})),omissions:[]};return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(value)}]}}]});};
  const job=await enqueueSummary(owner,{id,language:'English',detail:'balanced'});
  assert.equal(await drainJobs(owner,job.id),2);
  assert.equal((await findJob(owner,job.id)).state,'completed');assert.equal(calls,2);
  assert.equal(await drainJobs(owner,job.id),0);assert.equal(calls,2);
+});
+
+test('Gemini-only queue completes every transcript part, including its tail; quota never triggers another model',async()=>{
+ const owner='gemini-long-fixture',id=crypto.randomUUID();
+ const source=Array.from({length:12},(_,i)=>({id:i,start:i*60,text:('The square is blue. '.repeat(120))+(i===11?'The final exam is on 15 November.':'')}));
+ const total=summarySourceChunks(source,'balanced').length;assert.ok(total>1);
+ await env.DB.prepare('INSERT INTO notes(id,owner,title,source,transcript,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').bind(id,owner,'Long source','text',JSON.stringify(source),Date.now(),Date.now()).run();
+ let calls=0,part,seenTail=false;
+ globalThis.fetch=async(url,init)=>{
+   assert.equal(url,'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent');calls++;
+   const payload=JSON.parse(init.body),review=payload.systemInstruction.parts[0].text.includes('skeptical source reviewer');
+   const content=payload.contents[0].parts[0].text;
+   if(!review){const current=content.split('CURRENT PART:\n')[1]||content;seenTail ||= current.includes('final exam');const first=Number(current.match(/\[(\d+)\]/)[1]);part={title:'Square',overview:'The square is blue.',keyPoints:[{text:'The square is blue.',segmentIds:[first]}],chapters:[]};}
+   const value=review?{claims:summaryClaims(part).map(c=>({claimId:c.id,sourceIds:['0:0'],reason:'',verdict:'supported'})),omissions:[]}:part;
+   return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(value)}]}}]});
+ };
+ const job=await enqueueSummary(owner,{id,language:'English',detail:'balanced'});
+ for(let i=0;i<total*2;i++)await runNextJob(owner,job.id);
+ const done=await findJob(owner,job.id);assert.equal(done.state,'completed');assert.equal(done.completed_parts,total);assert.equal(calls,total*2);assert.equal(seenTail,true);
+ calls=0;globalThis.fetch=async url=>{calls++;assert.ok(url.includes('generativelanguage.googleapis.com'));return Response.json({error:{status:'RESOURCE_EXHAUSTED'}},{status:429,headers:{'retry-after':'60'}});};
+ await aiContext.run({owner,feature:'summary'},()=>assert.rejects(ai('test','test',z.object({ok:z.boolean()}),[]),e=>e.code==='PROVIDER_LIMIT'));
+ assert.equal(calls,1);
 });

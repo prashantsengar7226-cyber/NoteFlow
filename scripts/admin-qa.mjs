@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
 import {createClient} from '@libsql/client';
 export async function checkAdministration(a,b,base,dbUrl,results) {
   assert.equal(base,'http://127.0.0.1:3100');assert.ok(dbUrl.startsWith('file:'));
@@ -31,6 +32,37 @@ export async function checkAdministration(a,b,base,dbUrl,results) {
   await b.getByRole('cell',{name:'audit-0@example.invalid',exact:false}).waitFor();
   assert.equal(await b.getByRole('button',{name:'Manage access'}).count(),0);
   await a.screenshot({path:'audit/admin-people-desktop.png',fullPage:true});
+  // Synthetic costs remain in the temporary browser-test database only.
+  const month=new Date(now).toISOString().slice(0,7),project=process.env.VERTEX_PROJECT_ID||'test-project';
+  for(const [owner,cost,tokens] of [[root,.024,10000],[other,.009,2000]]){
+    const label=createHash('sha256').update('noteflow:'+owner).digest('hex').slice(0,24);
+    await db.execute({sql:"INSERT INTO vertex_usage(id,owner,owner_label,project,model,location,feature,state,input_tokens,output_tokens,thinking_tokens,estimated_usd,pricing_version,created_at,updated_at) VALUES(?,?,?,?,?,'global','summary','responded',?,1000,100,?,'synthetic',?,?)",args:[crypto.randomUUID(),owner,label,project,'gemini-3.5-flash',tokens,cost,now,now]});
+    await db.execute({sql:'INSERT INTO cloud_cost_rows(project,month,day,owner_label,currency,cost,credits) VALUES(?,?,?,?,?,?,?)',args:[project,month,month+'-01',label,'INR',owner===root?2:1,-.5]});
+  }
+  await db.execute({sql:'INSERT INTO cloud_cost_snapshots(project,month,synced_at,export_through) VALUES(?,?,?,?)',args:[project,month,now,new Date(now).toISOString()]});
+  await a.getByRole('button',{name:'Vertex costs',exact:true}).click();
+  await a.getByRole('heading',{name:'Spending by administrator'}).waitFor();
+  await a.getByRole('cell',{name:'audit-1@example.invalid',exact:false}).waitFor();
+  await a.getByText('Previously synced charges are shown below.',{exact:false}).waitFor();
+  await a.getByRole('button',{name:'Pause updates',exact:true}).click();
+  // After the pause-triggered request settles, a header refresh must issue its own cost request.
+  await a.waitForLoadState('networkidle');
+  const refreshed=a.waitForResponse(r=>r.url().includes('/api/admin/costs?')&&r.status()===200);
+  await a.getByRole('button',{name:'Refresh dashboard',exact:true}).click();
+  await refreshed;
+  await a.getByRole('button',{name:'Resume updates',exact:true}).click();
+  assert.equal(await a.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  await a.screenshot({path:'audit/admin-costs-desktop.png',fullPage:true});
+  await b.getByRole('button',{name:'Vertex costs',exact:true}).click();
+  await b.getByRole('heading',{name:'Recorded Vertex usage'}).waitFor();
+  assert.equal(await b.getByRole('heading',{name:'Spending by administrator'}).count(),0);
+  const ownCosts=await b.evaluate(async()=>await(await fetch('/api/admin/costs')).json());
+  assert.equal(ownCosts.scope,'own');assert.equal(ownCosts.totals.attempts,1);assert.equal(JSON.stringify(ownCosts).includes(root),false);
+  await a.setViewportSize({width:390,height:844});
+  assert.equal(await a.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  await a.screenshot({path:'audit/admin-costs-mobile.png',fullPage:true});
+  await a.setViewportSize({width:1440,height:1000});
+  results.push({check:'Vertex costs: superuser totals/per-admin data, admin-only own costs, uncapped copy, desktop/mobile layout; synthetic local records',pass:true});
   for(const title of ['Summary jobs','Live events','Audit history','Database']) {
     await a.getByRole('button',{name:title,exact:true}).click();
     await a.getByRole('heading',{name:title,exact:true}).waitFor();

@@ -1,5 +1,6 @@
 import { env } from './platform';
 import { aiContext, usesPersonalAI } from './ai-context';
+import { freeGeminiCandidate } from './free-ai';
 import { featureRouting, usesVertex } from './ai-policy';
 import { vertexConfig, vertexGenerate } from './vertex';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
@@ -35,18 +36,14 @@ export function config() {
   // Preserve explicit single-provider mode for debugging and staged rollout.
   const personal = aiContext.getStore()?.candidate;
   const vertex = usesVertex();
-  // Keep automatic shared routing on a tested endpoint rather than changing
-  // models between drafting and review. Explicit named/personal choices remain.
-  const sharedFreeModel = vars.FREE_AI_MODEL?.trim() || 'dots-studio/dots-3-note-preview:free';
-  if(featureRouting() && !sharedFreeModel.endsWith(':free') && sharedFreeModel !== 'openrouter/free')
-    throw new AppError(503,'AI_CONFIG','The shared study model must use a free endpoint.');
+  const free=freeGeminiCandidate();
   const selected = vertex ? [] : personal ? [personal] : featureRouting()
-    ? candidates.filter(item => item.provider === 'openrouter' && (item.model === 'openrouter/free' || item.model.endsWith(':free'))).map(item => ({...item, model:item.model==='openrouter/free'?sharedFreeModel:item.model, freeOnly:true}))
+    ? free ? [free] : []
     : requested === 'router' ? candidates : candidates.filter((item) => item.provider === requested);
   if (!['router', 'gemini', 'groq', 'openrouter'].includes(requested))
     throw new AppError(503, 'AI_CONFIG', 'AI is unavailable. The site owner needs to check the service configuration.');
   return {
-    provider: personal?.provider ?? requested,
+    provider: personal?.provider ?? (featureRouting()?'gemini':requested),
     candidates: selected,
     model: selected[0]?.model || '',
     aiKey: vertex ? 'vertex-server-auth' : selected[0]?.key,
@@ -779,7 +776,7 @@ export async function generateArtifact(
   const instruction = practice
     ? `${
         kind === 'quiz'
-          ? 'Return {questions:[{question,correctAnswer,distractors:[string,string,string],explanation,segmentIds:[number]}]}. Write the correct answer explicitly, plus exactly three distinct incorrect distractors. Do not return options or an answer index; the server arranges them. Each question must have one unambiguous answer. Ask directly stated source facts, not inferred arithmetic or relative comparisons. Buying 30 additional books is not buying 30 more than the previous year. Check the wording of the question against its answer and explanation. Explain why correctAnswer follows from the source.'
+          ? 'Return {questions:[{question,correctAnswer,distractors:[string,string,string],explanation,segmentIds:[number]}]}. Write the correct answer explicitly, plus exactly three distinct incorrect distractors. Do not return options or an answer index; the server arranges them. Each question must have one unambiguous answer. Ask directly stated source facts, not inferred arithmetic or relative comparisons. Buying 30 additional books is not buying 30 more than the previous year. Preserve time boundaries and distinguish purchases during a year from a cumulative total held by that year. If 120 books were bought in 2024 and 30 in 2025, 150 is the combined total; never ask how many were bought in 2025 with 150 as the answer. Check the wording of the question against its answer and explanation. Explain why correctAnswer follows from the source.'
           : 'Return {cards:[{front,back,segmentIds:[number]}]}. One clear recall prompt per card, with a self-contained answer.'
       }
 Generate up to ${count} NEW distinct items. Difficulty: ${study?.difficulty ?? 'mixed'}.

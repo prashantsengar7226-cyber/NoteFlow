@@ -23,5 +23,5 @@ test('Vertex rollout rejects missing setup and personal credentials',()=>{
   const errors=launchErrors({AI_FEATURE_ROUTING:'true',VERTEX_SERVICE_ACCOUNT_JSON:JSON.stringify({type:'authorized_user'})});
   assert.ok(errors.some(e=>e.includes('service-account')));
   assert.ok(errors.some(e=>e.includes('VERTEX_CREDIT_EXPIRES_AT')));
-  assert.ok(errors.some(e=>e.includes('free model')));
+  assert.ok(errors.some(e=>e.includes('Free-tier')));
 });

@@ -4,6 +4,10 @@ import { spawnSync } from 'node:child_process';
 const dest = new URL('../.test-runtime/', import.meta.url);
 await mkdir(dest, { recursive: true });
 const sources = {
+  'lib/free-ai.ts':'free-ai.mjs',
+  'lib/google-auth.ts':'google-auth.mjs',
+  'lib/vertex-costs.ts':'vertex-costs.mjs',
+  'app/api/admin/costs/route.ts':'admin-costs.mjs',
   'lib/access.ts':'access.mjs',
   'lib/operations.ts':'operations.mjs',
   'app/api/admin/route.ts':'admin.mjs',
@@ -48,7 +52,7 @@ for (const [path, name] of Object.entries(sources)) {
     .transpileModule(text, {
       compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 },
     })
-    .outputText.replace(/(['"])(?:@\/lib\/|\.\/)(access|operations|ai-policy|vertex|ai-context|ai-models|personal-ai|summary-quality|ai-jobs)\1/g, "'./$2.mjs'")
+    .outputText.replace(/(['"])(?:@\/lib\/|\.\/)(free-ai|google-auth|vertex-costs|access|operations|ai-policy|vertex|ai-context|ai-models|personal-ai|summary-quality|ai-jobs)\1/g, "'./$2.mjs'")
     .replaceAll("'next/server'", "'./harness.mjs'")
     .replaceAll("'cloudflare:workers'", "'./harness.mjs'")
     .replaceAll("'@/lib/billing'", "'./billing.mjs'")
@@ -77,11 +81,12 @@ await writeFile(
 );
 const result = process.argv.includes('--live-free-revision') ? spawnSync(process.execPath,['tests/live-free-revision.mjs',...process.argv.slice(2)],{stdio:'inherit'}) : process.argv.includes('--live-vertex') ? spawnSync(process.execPath,['tests/live-vertex.mjs',...process.argv.slice(2)],{stdio:'inherit'}) : spawnSync(
   process.execPath,
-  process.argv.includes('--live-free-performance') ? ['--experimental-transform-types', 'tests/live-free-performance.mjs'] : process.argv.includes('--live-repair') ? ['--experimental-transform-types', 'tests/live-repair.mjs', ...process.argv.slice(2)] : process.argv.includes('--live-source-review') ? ['--experimental-transform-types', 'tests/live-source-review.mjs', ...process.argv.slice(2)] : process.argv.includes('--live-queue') ? ['--experimental-transform-types', 'tests/live-queue.mjs', ...process.argv.slice(2)] : process.argv.includes('--verify-video-parts') ? ['--experimental-transform-types', 'tests/real-video-parts.mjs', ...process.argv.slice(2)] : process.argv.includes('--real-video-audit') ? ['--experimental-transform-types', 'tests/real-video-audit.mjs', ...process.argv.slice(2)] : process.argv.includes('--quality-benchmark') ? ['--experimental-transform-types', 'tests/quality-benchmark.mjs'] : process.argv.includes('--live-summary') ? ['--experimental-transform-types', 'tests/live-summary.mjs'] : [
+  process.argv.includes('--live-cost-metering') ? ['--experimental-transform-types', 'tests/live-cost-metering.mjs'] : process.argv.includes('--live-free-performance') ? ['--experimental-transform-types', 'tests/live-free-performance.mjs',...process.argv.slice(2)] : process.argv.includes('--live-repair') ? ['--experimental-transform-types', 'tests/live-repair.mjs', ...process.argv.slice(2)] : process.argv.includes('--live-source-review') ? ['--experimental-transform-types', 'tests/live-source-review.mjs', ...process.argv.slice(2)] : process.argv.includes('--live-queue') ? ['--experimental-transform-types', 'tests/live-queue.mjs', ...process.argv.slice(2)] : process.argv.includes('--verify-video-parts') ? ['--experimental-transform-types', 'tests/real-video-parts.mjs', ...process.argv.slice(2)] : process.argv.includes('--real-video-audit') ? ['--experimental-transform-types', 'tests/real-video-audit.mjs', ...process.argv.slice(2)] : process.argv.includes('--quality-benchmark') ? ['--experimental-transform-types', 'tests/quality-benchmark.mjs'] : process.argv.includes('--live-summary') ? ['--experimental-transform-types', 'tests/live-summary.mjs'] : [
     '--experimental-transform-types',
     '--test',
     'tests/auth.test.mjs',
     'tests/admin.test.mjs',
+    'tests/vertex-costs.test.mjs',
     'tests/launch-config.test.mjs',
     'tests/signout.test.mjs',
     'tests/security.test.mjs',

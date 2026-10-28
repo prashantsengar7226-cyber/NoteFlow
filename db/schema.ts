@@ -2,6 +2,7 @@ import {
   sqliteTable,
   text,
   integer,
+  real,
   index,
   primaryKey,
   uniqueIndex,
@@ -138,6 +139,18 @@ export const vertexBudget = sqliteTable('vertex_budget', {
   dailyCount: integer('daily_count').notNull(),
   totalCount: integer('total_count').notNull(),
 });
+export const vertexUsage=sqliteTable('vertex_usage',{
+  id:text('id').primaryKey(),owner:text('owner').notNull(),ownerLabel:text('owner_label').notNull(),
+  project:text('project').notNull(),model:text('model').notNull(),location:text('location').notNull(),feature:text('feature').notNull(),operationId:text('operation_id'),
+  state:text('state').notNull().default('pending'),inputTokens:integer('input_tokens'),cachedTokens:integer('cached_tokens'),outputTokens:integer('output_tokens'),thinkingTokens:integer('thinking_tokens'),
+  estimatedUsd:real('estimated_usd'),pricingVersion:text('pricing_version'),createdAt:integer('created_at').notNull(),updatedAt:integer('updated_at').notNull(),
+},t=>[index('vertex_usage_owner_created').on(t.owner,t.createdAt),index('vertex_usage_created').on(t.createdAt)]);
+export const cloudCostSnapshots=sqliteTable('cloud_cost_snapshots',{
+  project:text('project').notNull(),month:text('month').notNull(),syncedAt:integer('synced_at').notNull(),exportThrough:text('export_through'),
+},t=>[primaryKey({columns:[t.project,t.month]})]);
+export const cloudCostRows=sqliteTable('cloud_cost_rows',{
+  project:text('project').notNull(),month:text('month').notNull(),day:text('day').notNull(),ownerLabel:text('owner_label').notNull(),currency:text('currency').notNull(),cost:real('cost').notNull(),credits:real('credits').notNull(),
+},t=>[primaryKey({columns:[t.project,t.month,t.day,t.ownerLabel,t.currency]})]);
 export const imports = sqliteTable(
   'import_requests',
   {

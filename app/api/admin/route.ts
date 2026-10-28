@@ -6,8 +6,9 @@ import { requireAdmin, accessFor } from '@/lib/access';
 import { vertexReady } from '@/lib/vertex';
 import { schedulerConfigured } from '@/lib/ai-jobs';
 import { AppError } from '@/lib/core';
+import {freeGeminiCandidate} from '@/lib/free-ai';
 
-const tables=['accounts','user_directory','user_access','notes','artifacts','messages','ai_jobs','ai_operations','vertex_budget','billing_orders','billing_events','import_requests','admin_audit','operational_events'] as const;
+const tables=['accounts','user_directory','user_access','notes','artifacts','messages','ai_jobs','ai_operations','vertex_budget','vertex_usage','cloud_cost_snapshots','cloud_cost_rows','billing_orders','billing_events','import_requests','admin_audit','operational_events'] as const;
 const query=z.object({view:z.enum(['overview','users','jobs','events','audit','database']).default('overview'),page:z.coerce.number().int().min(0).max(10000).default(0),search:z.string().max(120).default(''),days:z.enum(['7','30']).default('7')});
 const mutation=z.discriminatedUnion('action',[
   z.object({action:z.literal('access'),owner:z.string().uuid(),role:z.enum(['user','admin']),suspended:z.boolean(),revision:z.string().uuid().nullable(),reason:z.string().trim().min(8).max(300)}).strict(),
@@ -37,7 +38,7 @@ export async function GET(request:Request) {
         all('SELECT code,COUNT(*) AS count FROM operational_events WHERE created_at>? AND (status>=400 OR event=?) GROUP BY code ORDER BY count DESC LIMIT 8',now-86400000,'job.failed'),
       ]);
       const series=Array.from({length:range},(_,i)=>{const day=new Date(start+i*86400000).toISOString().slice(0,10);return {day,count:Number(days.find(row=>row.day===day)?.count||0)};});
-      data={totals,jobs,days:series,sources:providers,lastScheduler,vertex,errors,health:{database:true,vertex:vertexReady(),scheduler:schedulerConfigured(),freeAI:!!process.env.OPENROUTER_API_KEY,transcripts:!!process.env.SUPADATA_API_KEY},window:`Activity: past 24 hours. Note trend: past ${range} calendar days (UTC), including today. Other totals are all-time. Vertex counts are provider attempts, not cost estimates.`};
+      data={totals,jobs,days:series,sources:providers,lastScheduler,vertex,errors,health:{database:true,vertex:vertexReady(),scheduler:schedulerConfigured(),freeAI:!!freeGeminiCandidate(),transcripts:!!process.env.SUPADATA_API_KEY},window:`Activity: past 24 hours. Note trend: past ${range} calendar days (UTC), including today. Other totals are all-time. Vertex counts are provider attempts, not cost estimates.`};
     } else if(view==='users') {
       const union='(SELECT owner FROM accounts UNION SELECT owner FROM user_directory UNION SELECT owner FROM user_access)';
       data={rows:await all(`SELECT u.owner,d.email,d.display_name,d.first_seen,d.last_seen,COALESCE(a.role,'user') AS role,COALESCE(a.suspended,0) AS suspended,a.revision,

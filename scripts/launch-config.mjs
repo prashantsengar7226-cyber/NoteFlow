@@ -7,9 +7,9 @@ export function launchErrors(env) {
     try { const credential=JSON.parse(env.VERTEX_SERVICE_ACCOUNT_JSON || '{}'); if(credential.type!=='service_account' || !credential.client_email || !credential.private_key) throw new Error(); }
     catch { errors.push('Production Vertex requires a service-account credential, not a personal Google login'); }
     if(!Number.isFinite(Date.parse(env.VERTEX_CREDIT_EXPIRES_AT || '')) || Date.parse(env.VERTEX_CREDIT_EXPIRES_AT)<=Date.now()) errors.push('Set a future VERTEX_CREDIT_EXPIRES_AT before credit expiry');
-    if(!env.OPENROUTER_API_KEY?.trim() || !(env.OPENROUTER_MODEL==='openrouter/free' || env.OPENROUTER_MODEL?.endsWith(':free')))
-      errors.push('Small features require an OpenRouter key and a free model');
-    if(!(env.AI_PROVIDER_ORDER || 'gemini,groq,openrouter').split(',').map(s=>s.trim()).includes('openrouter')) errors.push('AI_PROVIDER_ORDER must include openrouter for small features');
+    if(!env.GEMINI_FREE_API_KEY?.trim() || env.GEMINI_FREE_TIER_CONFIRMED!=='true')
+      errors.push('Shared Gemini requires GEMINI_FREE_API_KEY from a verified Free-tier project and GEMINI_FREE_TIER_CONFIRMED=true');
+    if(env.GEMINI_FREE_MODEL && !/^gemini-[a-zA-Z0-9.-]+$/.test(env.GEMINI_FREE_MODEL))errors.push('Invalid GEMINI_FREE_MODEL');
   }
   if (env.BYOK_ENCRYPTION_KEY && Buffer.from(env.BYOK_ENCRYPTION_KEY,'base64').length!==32)
     errors.push('BYOK_ENCRYPTION_KEY must encode 32 random bytes in base64');
@@ -38,7 +38,7 @@ export function launchErrors(env) {
   if(!['router',...Object.keys(keys)].includes(provider)) errors.push('Invalid AI_PROVIDER');
   const order=(env.AI_PROVIDER_ORDER || 'gemini,groq,openrouter').split(',').map(value=>value.trim().toLowerCase()).filter(Boolean);
   if(!order.length || order.some(name=>!Object.hasOwn(keys,name))) errors.push('Invalid AI_PROVIDER_ORDER');
-  if(!order.some(name=>(provider==='router' || name===provider) && env[keys[name]]?.trim()))
+  if(env.AI_FEATURE_ROUTING!=='true'&&!order.some(name=>(provider==='router' || name===provider) && env[keys[name]]?.trim()))
     errors.push('Configure at least one selected AI provider key for launch');
   return errors;
 }

@@ -1,13 +1,14 @@
 'use client';
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
-import { Activity, ArrowLeft, Database, FileClock, LayoutDashboard, ListChecks, Pause, Play, RefreshCw, Search, ShieldCheck, Users, X } from 'lucide-react';
+import { Activity, ArrowLeft, Coins, Database, FileClock, LayoutDashboard, ListChecks, Pause, Play, RefreshCw, Search, ShieldCheck, Users, X } from 'lucide-react';
 import type { Role } from '@/lib/access';
 import {AdminOverview} from './overview';
-type View='overview'|'users'|'jobs'|'events'|'audit'|'database';
+import {AdminCosts} from './costs';
+type View='costs'|'overview'|'users'|'jobs'|'events'|'audit'|'database';
 type Row=Record<string,string|number|null>;
 type Payload={role:Role;accountId:string;refreshedAt:number;data:{rows?:Row[];totals?:Row;jobs?:Row[];days?:Row[];sources?:Row[];errors?:Row[];vertex?:Row[];lastScheduler?:Row;health?:Record<string,boolean>;window?:string;counts?:Row[];schema?:Row[];migrations?:Row[];policy?:string;retention?:string}};
-const sections=[{id:'overview',label:'Overview',icon:LayoutDashboard},{id:'users',label:'People & roles',icon:Users},{id:'jobs',label:'Summary jobs',icon:ListChecks},{id:'events',label:'Live events',icon:Activity},{id:'audit',label:'Audit history',icon:FileClock},{id:'database',label:'Database',icon:Database}] as const;
+const sections=[{id:'costs',label:'Vertex costs',icon:Coins},{id:'overview',label:'Overview',icon:LayoutDashboard},{id:'users',label:'People & roles',icon:Users},{id:'jobs',label:'Summary jobs',icon:ListChecks},{id:'events',label:'Live events',icon:Activity},{id:'audit',label:'Audit history',icon:FileClock},{id:'database',label:'Database',icon:Database}] as const;
 const date=(v:unknown)=>typeof v==='number'&&v>0?new Date(v).toLocaleString():'Not recorded';
 const value=(v:unknown)=>v===null||v===undefined?'—':String(v);
 export default function AdminDashboard({role,owner}:{role:Role;owner:string}) {
@@ -18,6 +19,7 @@ export default function AdminDashboard({role,owner}:{role:Role;owner:string}) {
   const dialog=useRef<HTMLDialogElement>(null);
   useEffect(()=>{const timer=setTimeout(()=>{setQuery(search);setPage(0);},300);return()=>clearTimeout(timer);},[search]);
   useEffect(()=>{
+    if(view==='costs'){setLoading(false);setError('');return;}
     const controller=new AbortController();let pending=false;
     const load=async()=>{
       if(pending||controller.signal.aborted)return;pending=true;setLoading(true);
@@ -44,10 +46,11 @@ export default function AdminDashboard({role,owner}:{role:Role;owner:string}) {
   return <div className="admin-app">
     <a href="#admin-main" className="admin-skip">Skip to administration</a>
     <aside className="admin-rail"><Link href="/" className="admin-brand">noteflow<span>.</span></Link><p className="admin-product-label">Administration</p><nav aria-label="Administration sections">{sections.filter(s=>s.id!=='database'||role==='superuser').map(s=><button key={s.id} aria-current={view===s.id?'page':undefined} onClick={()=>navigate(s.id)}><s.icon size={18}/>{s.label}</button>)}</nav><div className="admin-identity"><ShieldCheck size={20}/><strong>{role==='superuser'?'Superuser':'Administrator'}</strong><span>Signed-in account</span><code>{owner}</code><Link href="/"><ArrowLeft size={16}/>Back to workspace</Link></div></aside>
-    <main id="admin-main" className="admin-main"><header className="admin-header"><div><h1>{title}</h1><p>{view==='users'?'Know who has access and what they can do.':view==='jobs'?'Monitor saved work and recover interrupted tasks.':view==='events'?'Application activity, refreshed every 10 seconds.':view==='audit'?'An append-only record of administrative changes.':view==='database'?'Inspect storage structure and migration status.':'Your workspace operations at a glance.'}</p></div><div className="admin-live-controls"><button aria-pressed={live} onClick={()=>setLive(v=>!v)}>{live?<Pause size={15}/>:<Play size={15}/>} {live?'Pause updates':'Resume updates'}</button><button disabled={loading} onClick={()=>setRefresh(n=>n+1)} aria-label="Refresh dashboard"><RefreshCw size={16}/></button></div></header>
-      <div className="admin-status"><span className={error?'status-warn':'status-ready'}>{error?'Refresh unavailable':loading?'Refreshing…':live?'Auto refresh on':'Updates paused'}</span><span>Updated {data?date(data.refreshedAt):'—'}</span></div>
+    <main id="admin-main" className="admin-main"><header className="admin-header"><div><h1>{title}</h1><p>{view==='costs'?'Understand model usage, estimated spend and reported Google charges.':view==='users'?'Know who has access and what they can do.':view==='jobs'?'Monitor saved work and recover interrupted tasks.':view==='events'?'Application activity, refreshed every 10 seconds.':view==='audit'?'An append-only record of administrative changes.':view==='database'?'Inspect storage structure and migration status.':'Your workspace operations at a glance.'}</p></div><div className="admin-live-controls"><button aria-pressed={live} onClick={()=>setLive(v=>!v)}>{live?<Pause size={15}/>:<Play size={15}/>} {live?'Pause updates':'Resume updates'}</button><button disabled={loading} onClick={()=>setRefresh(n=>n+1)} aria-label="Refresh dashboard"><RefreshCw size={16}/></button></div></header>
+      {view!=='costs'&&<div className="admin-status"><span className={error?'status-warn':'status-ready'}>{error?'Refresh unavailable':loading?'Refreshing…':live?'Auto refresh on':'Updates paused'}</span><span>Updated {data?date(data.refreshedAt):'—'}</span></div>}
       {error&&<div className="admin-alert" role="alert">{error} {data&&'Showing the last successful result.'}</div>}{notice&&<p className="admin-notice" role="status">{notice}</p>}
-      {!data&&!error?<p role="status" className="admin-loading">Loading administration…</p>:null}
+      {view!=='costs'&&!data&&!error?<p role="status" className="admin-loading">Loading administration…</p>:null}
+      {view==='costs'&&<AdminCosts superuser={role==='superuser'} live={live} refresh={refresh}/>}
       {d&&view==='overview'&&<AdminOverview data={d} range={range} onRange={setRange} onView={navigate}/>}
       {d&&['users','jobs','events','audit'].includes(view)&&<>
         <div className="admin-toolbar"><label><Search size={17}/><span className="sr-only">Search administration</span><input value={search} onChange={e=>setSearch(e.target.value)} placeholder={view==='users'?'Find by email or account ID…':view==='jobs'?'Find by state, job or account ID…':'Find by event, code or account ID…'}/></label><button onClick={download}>Export visible page</button></div>

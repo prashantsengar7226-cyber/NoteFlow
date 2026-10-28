@@ -1084,7 +1084,7 @@ export default function Workspace({ name }: { name: string }) {
             <div className="sidebar-usage-label">
               <span>{status?.featureRouting ? 'AI access' : 'AI operations today'}</span>
               <strong>
-                {status?.connection?.mode === 'personal' ? 'Personal key' : status?.featureRouting ? (status.vertex ? 'Vertex · admin' : 'Free models') : `${status?.usage.ai ?? 0} / ${status?.dailyLimits.ai ?? 20}`}
+                {status?.connection?.mode === 'personal' ? 'Personal key' : status?.featureRouting ? (status.vertex ? 'Vertex · admin' : 'Gemini free tier') : `${status?.usage.ai ?? 0} / ${status?.dailyLimits.ai ?? 20}`}
               </strong>
             </div>
             {!status?.featureRouting && <progress
@@ -2426,7 +2426,7 @@ export default function Workspace({ name }: { name: string }) {
                       AI allowance
                     </span>
                     <strong>
-                      {status?.connection?.mode === 'personal' ? 'Personal key' : status?.featureRouting ? (status.vertex ? 'Vertex · admin' : 'Free models') : Math.max(0, (status?.dailyLimits.ai ?? 20) - (status?.usage.ai ?? 0))}
+                      {status?.connection?.mode === 'personal' ? 'Personal key' : status?.featureRouting ? (status.vertex ? 'Vertex · admin' : 'Gemini free tier') : Math.max(0, (status?.dailyLimits.ai ?? 20) - (status?.usage.ai ?? 0))}
                       {status?.connection?.mode !== 'personal' && !status?.featureRouting && <small> / {status?.dailyLimits.ai ?? 20}</small>}
                     </strong>
                     <small>{status?.connection?.mode === 'personal' || status?.featureRouting ? 'Provider limits apply' : 'Operations remaining today'}</small>
