@@ -10,9 +10,10 @@ export const isAIAdmin = (owner: string) => {
   return scope?.owner===owner && !!scope.role && elevated(scope.role);
 };
 export const premiumFeature = (feature?: string) => feature === 'summary' || feature === 'insights';
+export const vertexToolFeature = (feature?: string) => ['chat','quiz','flashcards','mindmap','slides','translation'].includes(feature || '');
 export const usesVertex = () => {
   const scope = aiContext.getStore();
-  return !!scope && featureRouting() && isAIAdmin(scope.owner) && premiumFeature(scope.feature) && !scope.candidate;
+  return !!scope && featureRouting() && isAIAdmin(scope.owner) && (premiumFeature(scope.feature) || vertexToolFeature(scope.feature)) && !scope.candidate;
 };
 export function withAIFeature<T>(feature: string, work: () => Promise<T>) {
   const scope = aiContext.getStore();

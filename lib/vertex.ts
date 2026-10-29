@@ -1,7 +1,7 @@
 import { env } from './platform';
 import { AppError } from './core';
 import { providerFetch, providerJson } from './provider';
-import { usesVertex } from './ai-policy';
+import { usesVertex, vertexToolFeature } from './ai-policy';
 import { activeAccess, elevated } from './access';
 import { aiContext } from './ai-context';
 import { recordEvent } from './operations';
@@ -14,12 +14,13 @@ export function vertexConfig() {
   const v = vars();
   const project = v.VERTEX_PROJECT_ID || '';
   const location = v.VERTEX_LOCATION || 'global';
-  const model = v.VERTEX_MODEL || '';
+  const model = vertexToolFeature(aiContext.getStore()?.feature)
+    ? (v.VERTEX_TOOLS_MODEL || 'gemini-3.1-flash-lite') : (v.VERTEX_MODEL || '');
   const expires = Date.parse(v.VERTEX_CREDIT_EXPIRES_AT || '');
   if (v.VERTEX_ENABLED !== 'true' || !/^[a-z][a-z0-9-]{4,61}[a-z0-9]$/.test(project) ||
       !/^(global|[a-z]+-[a-z]+[0-9])$/.test(location) || !/^gemini-[a-zA-Z0-9.-]+$/.test(model) ||
       !Number.isFinite(expires) || expires <= Date.now() || (!v.VERTEX_SERVICE_ACCOUNT_JSON && !localADC()))
-    throw new AppError(503,'VERTEX_NOT_CONFIGURED','AI summaries and insights are not available yet. Basic source notes and smaller tools remain available.');
+    throw new AppError(503,'VERTEX_NOT_CONFIGURED','The administrator AI connection is unavailable. Check the Vertex configuration. Basic source notes remain available.');
   return { project, location, model, expires };
 }
 export function vertexReady() { try { vertexConfig(); return true; } catch { return false; } }

@@ -13,13 +13,13 @@ import {summaryClaims,evidenceCatalog,resolveEvidence,validateReview,alignReview
 import {summaryTrialEnabled} from '../.test-runtime/summary-trial.mjs';
 import {summarySourceChunks} from '../.test-runtime/study.mjs';
 const originalFetch=globalThis.fetch;
-test('paid boundary rejects anonymous, regular, small-tool and personal-key callers without fetching',async()=>{
+test('paid boundary rejects anonymous, regular, unknown-feature and personal-key callers without fetching',async()=>{
   env.AI_FEATURE_ROUTING='true';
   const admin='12345678-1234-1234-1234-123456789abc';env.AI_ADMIN_USER_IDS=admin;
   let calls=0;globalThis.fetch=async()=>{calls++;throw new Error('Unexpected paid request');};
   await assert.rejects(vertexGenerate({},1000),e=>e.code==='VERTEX_ADMIN_ONLY');
   for(const scope of [{owner:'regular-user',feature:'summary'},
-    {owner:admin,role:'admin',feature:'quiz'}, {owner:admin,role:'admin',feature:'summary',candidate:{provider:'gemini',key:'personal',model:'test'}}]) {
+    {owner:admin,role:'admin',feature:'unknown'}, {owner:admin,role:'admin',feature:'summary',candidate:{provider:'gemini',key:'personal',model:'test'}}]) {
     await aiContext.run(scope,async()=>{
       assert.equal(usesVertex(),false);
       await assert.rejects(vertexGenerate({},1000),e=>e.code==='VERTEX_ADMIN_ONLY');
@@ -30,6 +30,7 @@ test('paid boundary rejects anonymous, regular, small-tool and personal-key call
   await aiContext.run({owner:admin,role:'admin',feature:'insights'},async()=>assert.equal(usesVertex(),true));
 });
 beforeEach(async()=>{
+  delete env.VERTEX_TOOLS_MODEL;
   await env.DB.prepare("INSERT INTO user_access(owner,role,suspended,revision,updated_by,updated_at) VALUES(?,'admin',0,?,'test',?) ON CONFLICT(owner) DO UPDATE SET role='admin',suspended=0").bind('12345678-1234-1234-1234-123456789abc',crypto.randomUUID(),Date.now()).run();
   await env.DB.prepare('DELETE FROM ai_operations').run();
   await env.DB.prepare('DELETE FROM limits').run();
@@ -37,6 +38,24 @@ beforeEach(async()=>{
   env.AI_FEATURE_ROUTING='true';env.AI_PROVIDER='router';env.AI_PROVIDER_ORDER='gemini,groq,openrouter';
   env.GEMINI_API_KEY='not-free';env.GROQ_API_KEY='not-free';env.OPENROUTER_API_KEY='free-fixture';env.OPENROUTER_MODEL='openrouter/free';
   env.VERTEX_ENABLED='false';env.AI_ADMIN_USER_IDS='';env.GEMINI_FREE_API_KEY='gemini-free-fixture';env.GEMINI_FREE_TIER_CONFIRMED='true';
+});
+
+test('admin interactive tools use a separate Vertex model and never the free circuit',async()=>{
+ const owner='12345678-1234-1234-1234-123456789abc';
+ Object.assign(env,{VERTEX_ENABLED:'true',VERTEX_PROJECT_ID:'test-project',VERTEX_LOCATION:'global',VERTEX_MODEL:'gemini-3.8-flash',VERTEX_CREDIT_EXPIRES_AT:'2099-01-01',VERTEX_SERVICE_ACCOUNT_JSON:'configured'});
+ for(const role of ['admin','superuser'])for(const feature of ['chat','quiz','flashcards','mindmap','slides','translation']){
+  await aiContext.run({owner,role,feature},async()=>{
+   assert.equal(usesVertex(),true);assert.equal(config().aiKey,'vertex-server-auth');
+   assert.equal(vertexConfig().model,'gemini-3.1-flash-lite');
+  });
+ }
+ await aiContext.run({owner,role:'admin',feature:'summary'},async()=>assert.equal(vertexConfig().model,'gemini-3.8-flash'));
+ env.VERTEX_TOOLS_MODEL='gemini-custom';
+ await aiContext.run({owner,role:'admin',feature:'chat'},async()=>assert.equal(vertexConfig().model,'gemini-custom'));
+ await env.DB.prepare("UPDATE user_access SET role='user' WHERE owner=?").bind(owner).run();
+ let calls=0;globalThis.fetch=async()=>{calls++;throw Error('Unexpected fetch');};
+ await aiContext.run({owner,role:'admin',feature:'chat'},()=>assert.rejects(vertexGenerate({},1000),e=>e.code==='VERTEX_ADMIN_ONLY'));
+ assert.equal(calls,0);
 });
 afterEach(()=>{globalThis.fetch=originalFetch;delete env.SUMMARY_LARGE_BATCHES;delete env.SUMMARY_PIPELINE_TRIAL;delete env.VERCEL;});
 

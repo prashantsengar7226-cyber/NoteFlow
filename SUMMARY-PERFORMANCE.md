@@ -112,3 +112,12 @@ The earlier completed targeted-repair run took 340.748 seconds and 47 requests, 
 - Gemini optimization: https://ai.google.dev/gemini-api/docs/optimization
 - Supabase management authentication: https://supabase.com/docs/reference/api/introduction
 - Turso management authentication: https://docs.turso.tech/api-reference/authentication
+# Admin study-tool routing — 29 October 2026
+
+The shared-site admin policy previously routed only summaries and insights to Vertex, leaving chat, quizzes, flashcards, mind maps, slides and translation on Gemini's free-tier circuit. Those six tools now use Vertex for database-validated admins and superusers. The paid boundary still rechecks the database role. Regular accounts remain free-tier; explicitly connected personal keys retain precedence. No automatic fallback to the shared free key is used for an admin Vertex failure.
+
+`VERTEX_TOOLS_MODEL` independently selects the interactive model (default `gemini-3.1-flash-lite`). `VERTEX_MODEL` continues to control summaries and insights. Cost attribution uses the actual selected model, feature and owner in the existing Vertex ledger. Existing request throttles, source/schema validation, leases and ownership checks remain in place; admins have no product usage allowance.
+
+Validation: 198 automated tests passed. Six real Vertex calls on a synthetic three-section library-policy transcript passed schema/citation checks (chat, quiz, flashcards, mind map, slides, Hindi translation), taking 0.82–2.24 seconds each including authentication overhead. All six attempts were attributed and priced in temporary local storage; combined estimated list cost $0.00192575. These are small-source smoke tests, not a full-video accuracy benchmark or a guarantee of equal model capability. Evidence: `audit/live-admin-tools.json`.
+
+Cost rationale: Google standard global pricing for Gemini 3.1 Flash-Lite is $0.25/M input and $1.50/M output tokens, compared with current Gemini 3.8 Flash introductory pricing of $0.75/M and $3.75/M through 31 December 2026. This reduces unit rates by approximately 67% and 60% respectively for these tools. Actual spend depends on tokens, retries and credits; billing exports remain the source of actual charges. Source: https://cloud.google.com/model-garden/pricing . Keep the more capable summary model until a comparable quality evaluation supports changing it. Reuse saved study artifacts and retain bounded source retrieval rather than repeatedly submitting full transcripts for small questions.
